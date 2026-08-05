@@ -1,0 +1,7 @@
+# Competition infrastructure is not part of an entry and must receive maintainer review.
+/bonsai/ @gersh
+/.github/ @gersh
+/RULES.md @gersh
+/lakefile.lean @gersh
+/lake-manifest.json @gersh
+/lean-toolchain @gersh

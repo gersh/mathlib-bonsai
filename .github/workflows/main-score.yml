@@ -1,0 +1,25 @@
+name: Bonsai reigning score
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  score:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - name: Calculate reigning score
+        run: |
+          python3 -m bonsai.scorer . --output reigning-score.json >/dev/null
+          total=$(python3 -c 'import json; print(json.load(open("reigning-score.json"))["total"])')
+          printf '## Reigning score\n\n%,d symbols\n' "$total" >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: reigning-score-${{ github.sha }}
+          path: reigning-score.json
+          retention-days: 90

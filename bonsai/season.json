@@ -1,0 +1,10 @@
+{
+  "schema": 1,
+  "season": 1,
+  "name": "Mathlib Bonsai: In Search of THE BOOK",
+  "upstream": "leanprover-community/mathlib4",
+  "upstreamCommit": "b2418b04047e1da8b7dd99534965d44fc1de9288",
+  "leanToolchain": "leanprover/lean4:v4.33.0-rc2",
+  "initialScore": 58332428,
+  "scoredFiles": 8303
+}
