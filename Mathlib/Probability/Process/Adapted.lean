@@ -195,7 +195,7 @@ def IsProgressive [MeasurableSpace ι] [MeasurableSpace β] (f : Filtration ι m
 
 theorem isProgressive_const {mi : MeasurableSpace ι} {mβ : MeasurableSpace β} (f : Filtration ι m)
     (b : β) : IsProgressive f (fun _ _ => b : ι → Ω → β) :=
-  fun _ ↦ by exact measurable_const
+  fun _ ↦ measurable_const
 
 namespace IsProgressive
 

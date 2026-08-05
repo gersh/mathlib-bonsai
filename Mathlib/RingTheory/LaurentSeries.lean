@@ -173,7 +173,8 @@ def derivative (R : Type*) {V : Type*} [AddCommGroup V] [Semiring R] [Module R V
   hasseDeriv R 1
 
 @[simp]
-theorem derivative_apply (f : LaurentSeries V) : derivative R f = hasseDeriv R 1 f := rfl
+theorem derivative_apply (f : LaurentSeries V) : derivative R f = hasseDeriv R 1 f := by
+  exact rfl
 
 theorem derivative_iterate (k : ℕ) (f : LaurentSeries V) :
     (derivative R)^[k] f = k.factorial • (hasseDeriv R k f) := by
