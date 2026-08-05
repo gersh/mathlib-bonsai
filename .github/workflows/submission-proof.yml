@@ -77,6 +77,12 @@ jobs:
           CI: "true"
         run: lake build --wfail Mathlib
 
+      - name: Reject build-time source generation
+        working-directory: candidate
+        run: |
+          git diff --exit-code HEAD
+          test -z "$(git status --porcelain --untracked-files=all)"
+
       - name: Measure candidate
         run: |
           python3 baseline/bonsai/scorer.py candidate --output candidate-score.json >/dev/null

@@ -14,6 +14,28 @@ def load_json(path: Path) -> object:
         return json.load(stream)
 
 
+def validate_score(value: object, path: Path) -> dict[str, object]:
+    """Validate the complete versioned score manifest, not only its headline."""
+    if not isinstance(value, dict):
+        raise ValueError(f"{path}: invalid score manifest")
+    if value.get("schema") != 2 or value.get("metric") != "lean-structural-source-units-v1":
+        raise ValueError(f"{path}: unsupported score manifest")
+    if value.get("limits") != {"identifierScalars": 256, "operatorScalars": 32}:
+        raise ValueError(f"{path}: unexpected anti-packing limits")
+    files = value.get("files")
+    if not isinstance(files, dict) or not files:
+        raise ValueError(f"{path}: missing file scores")
+    if any(not isinstance(name, str) or not isinstance(score, int) or score < 0
+           for name, score in files.items()):
+        raise ValueError(f"{path}: invalid file score")
+    for key in ("total", "literalPayload", "sourceScalars"):
+        if not isinstance(value.get(key), int) or value[key] < 0:
+            raise ValueError(f"{path}: invalid {key}")
+    if value["total"] != sum(files.values()):
+        raise ValueError(f"{path}: total does not match per-file scores")
+    return value
+
+
 def load_surface(path: Path) -> dict[str, object]:
     """Load the streaming JSON-lines format emitted by bonsai/surface.lean."""
     result: dict[str, object] = {"schema": None, "theorems": [], "axioms": [],
@@ -107,14 +129,16 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
 
     try:
-        baseline_score = load_json(args.baseline_score)
-        candidate_score = load_json(args.candidate_score)
+        baseline_score = validate_score(load_json(args.baseline_score), args.baseline_score)
+        candidate_score = validate_score(load_json(args.candidate_score), args.candidate_score)
         baseline_surface = load_surface(args.baseline_surface)
         candidate_surface = load_surface(args.candidate_surface)
-        if not isinstance(baseline_score, dict) or not isinstance(candidate_score, dict):
-            raise ValueError("invalid score manifest")
         old_total = int(baseline_score["total"])
         new_total = int(candidate_score["total"])
+        old_payload = int(baseline_score["literalPayload"])
+        new_payload = int(candidate_score["literalPayload"])
+        old_scalars = int(baseline_score["sourceScalars"])
+        new_scalars = int(candidate_score["sourceScalars"])
         surface = compare_surfaces(
             baseline_surface, candidate_surface, args.baseline_surface, args.candidate_surface
         )
@@ -122,14 +146,22 @@ def main(argv: list[str] | None = None) -> int:
         print(f"comparison error: {error}", file=sys.stderr)
         return 2
 
+    payload_safe = new_payload <= old_payload
     result = {
-        "schema": 1,
+        "schema": 2,
+        "metric": "lean-structural-source-units-v1",
         "baselineScore": old_total,
         "candidateScore": new_total,
         "delta": new_total - old_total,
+        "baselineLiteralPayload": old_payload,
+        "candidateLiteralPayload": new_payload,
+        "literalPayloadDelta": new_payload - old_payload,
+        "literalPayloadSafe": payload_safe,
+        "baselineSourceScalars": old_scalars,
+        "candidateSourceScalars": new_scalars,
         "smaller": new_total < old_total,
         "surface": surface,
-        "accepted": new_total < old_total and bool(surface["compatible"]),
+        "accepted": new_total < old_total and payload_safe and bool(surface["compatible"]),
     }
     encoded = json.dumps(result, ensure_ascii=False, indent=2, sort_keys=True) + "\n"
     if args.output:
@@ -137,13 +169,17 @@ def main(argv: list[str] | None = None) -> int:
 
     delta = result["delta"]
     sign = "+" if isinstance(delta, int) and delta >= 0 else ""
+    payload_delta = new_payload - old_payload
+    payload_sign = "+" if payload_delta >= 0 else ""
     status = "✅ eligible" if result["accepted"] else "❌ not eligible"
     markdown = (
         "## Mathlib Bonsai result\n\n"
         "| Check | Result |\n|---|---:|\n"
-        f"| Baseline | {old_total:,} symbols |\n"
-        f"| Candidate | {new_total:,} symbols |\n"
-        f"| Change | {sign}{delta:,} symbols |\n"
+        f"| Baseline | {old_total:,} structural units |\n"
+        f"| Candidate | {new_total:,} structural units |\n"
+        f"| Change | {sign}{delta:,} structural units |\n"
+        f"| Literal-payload guard | {payload_sign}{payload_delta:,} scalars "
+        f"({'safe' if payload_safe else 'increased'}) |\n"
         f"| Public theorem surface | {'exact match' if surface['compatible'] else 'changed'} |\n"
         f"| Verdict | {status} |\n"
     )
@@ -158,6 +194,11 @@ def main(argv: list[str] | None = None) -> int:
                 markdown += "\n"
         if surface["axiomsChanged"]:
             markdown += "\n- the public Mathlib axiom set changed\n"
+    if not payload_safe:
+        markdown += (
+            "\nLiteral payload increased. Entries may not pack removed proof structure into strings, "
+            "characters, raw strings, or numeric literals.\n"
+        )
     if args.markdown:
         args.markdown.write_text(markdown, encoding="utf-8")
     else:

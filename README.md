@@ -5,17 +5,18 @@
 Mathlib Bonsai is a continuous competition to make Mathlib's proofs smaller without changing the
 public theorem surface. The default branch is the reigning entry. Open a pull request containing a
 smaller implementation; GitHub Actions builds it, compares every public theorem name and elaborated
-type with the PR's base commit, checks its axioms, and reports the symbol delta.
+type with the PR's base commit, checks its axioms, and reports the structural-unit delta.
 
 The frozen starting point is
 [`leanprover-community/mathlib4@b2418b0`](https://github.com/leanprover-community/mathlib4/commit/b2418b04047e1da8b7dd99534965d44fc1de9288),
-using Lean `v4.33.0-rc2`. Its initial score is **58,332,428 symbols** across 8,303 Lean files.
+using Lean `v4.33.0-rc2`. Its initial score is **18,900,593 structural units** across 8,303 Lean
+files.
 
 ## Reigning Bonsai
 
 | Rank | Gardener | Score | Saved this season | Entry |
 |---:|---|---:|---:|---|
-| 1 | [Mathlib community](https://github.com/leanprover-community/mathlib4/graphs/contributors) | 58,332,428 | — | Season 1 baseline |
+| 1 | [Mathlib community](https://github.com/leanprover-community/mathlib4/graphs/contributors) | 18,900,593 | — | Season 1 baseline |
 
 Only strict improvements merge, so the first row is always the current champion. The accepted PR
 history is the season's record book. [See the current contenders](https://github.com/gersh/mathlib-bonsai/pulls?q=is%3Aopen+label%3Abonsai%3Aeligible).
@@ -31,7 +32,7 @@ Formal libraries give that old aspiration an unusual experimental tool. When the
 held fixed, compression forces us to look for shared lemmas, stronger abstractions, cleaner
 arguments, and proofs that let the structure of the mathematics do more of the work. The score is
 objective; beauty is not. A short proof can be a trick, and a beautiful proof may need a few more
-symbols. This competition uses size as a searchlight, not as a definition of elegance.
+units. This competition uses size as a searchlight, not as a definition of elegance.
 
 Read [THE_BOOK.md](THE_BOOK.md) for the full vision.
 
@@ -64,21 +65,23 @@ The fork-side Submission proof action produces a downloadable proof artifact for
 you intend to submit. Because fork workflows are contributor-controlled, the central PR action
 repeats the verification from trusted `main` tooling before declaring an entry eligible.
 
-The complete contract, including what counts as a symbol and what the automation compares, is in
+The complete contract, including what counts as a source unit and what the automation compares, is in
 [RULES.md](RULES.md). Contribution and repository setup instructions are in
 [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## What is measured?
 
-The official score covers `Mathlib.lean` and every `Mathlib/**/*.lean` file. One Unicode scalar
-value in Lean source costs one symbol. Comments and layout whitespace cost zero. Text inside
-strings, character literals, raw strings, and quoted identifiers is semantic source and is charged.
-UTF-8 bytes, generated `.olean` files, tests, documentation, and competition infrastructure are not
-part of the score.
+The official score covers `Mathlib.lean` and every `Mathlib/**/*.lean` file. Each identifier,
+keyword, operator, delimiter, or literal costs one structural unit; spelling length does not matter.
+Comments and layout cost zero. Thus `by exact rfl` costs three units and `rfl` costs one, while
+renaming `longLocalName` to `x` saves nothing.
 
-This metric makes `∀` and `x` cost the same, makes formatting free, and keeps long local or tactic
-names honest. Entrants cannot move code into an unscored file: CI rejects every PR change outside
-the scored tree.
+Literal payload is tracked separately and may not increase, unusually large identifiers/operators
+are rejected, and raw character count is diagnostic only. Together with a fixed toolchain, exact
+theorem-surface comparison, axiom auditing, a scored-tree-only change policy, isolated trusted CI,
+and human review, this blocks the obvious packing and generated-code shortcuts. Tests,
+documentation, competition infrastructure, and generated `.olean` files are unscored and cannot be
+changed by an entry. The detailed anti-evasion contract is in [RULES.md](RULES.md).
 
 ## What does “same surface” mean?
 

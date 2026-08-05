@@ -11,14 +11,18 @@ import sys
 
 def allowed(path: str) -> bool:
     item = PurePosixPath(path)
-    return path == "Mathlib.lean" or (
+    canonical = item.as_posix() == path and not any(part in {".", ".."} for part in item.parts)
+    return canonical and (path == "Mathlib.lean" or (
         len(item.parts) >= 2 and item.parts[0] == "Mathlib" and item.suffix == ".lean"
-    )
+    ))
 
 
 def changed_paths(repository: str, base: str, head: str) -> list[str]:
     result = subprocess.run(
-        ["git", "-C", repository, "diff", "--name-only", "-z", base, head],
+        # Disabling rename detection reports both sides of a move. Otherwise a
+        # protected file renamed into Mathlib could appear only under its new,
+        # superficially allowed path.
+        ["git", "-C", repository, "diff", "--no-renames", "--name-only", "-z", base, head],
         check=True,
         stdout=subprocess.PIPE,
     )
