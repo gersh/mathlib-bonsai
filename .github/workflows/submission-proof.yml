@@ -17,7 +17,7 @@ jobs:
     timeout-minutes: 120
     steps:
       - name: Check out candidate branch
-        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ github.sha }}
           fetch-depth: 0
@@ -25,7 +25,7 @@ jobs:
           path: candidate
 
       - name: Check out reigning Bonsai
-        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: gersh/mathlib-bonsai
           ref: main
@@ -63,6 +63,10 @@ jobs:
         working-directory: baseline
         run: lake exe cache --repo=leanprover-community/mathlib4 get
 
+      - name: Build trusted complexity meter
+        working-directory: baseline
+        run: lake build bonsai-measure
+
       - name: Measure reigning baseline
         run: |
           python3 baseline/bonsai/scorer.py baseline --output baseline-score.json >/dev/null
@@ -70,7 +74,11 @@ jobs:
             '${{ steps.revisions.outputs.base }}' '${{ steps.revisions.outputs.candidate }}')
           python3 baseline/bonsai/heartbeats.py baseline "${changed[@]}" \
             --output baseline-heartbeats.json
-          baseline/bonsai/export_surface.sh baseline baseline/bonsai/surface.lean baseline-surface.jsonl
+          python3 baseline/bonsai/complexity.py baseline "${changed[@]}" \
+            --executable baseline/.lake/build/bin/bonsai-measure \
+            --output baseline-complexity.json
+          baseline/bonsai/export_surface.sh baseline baseline/bonsai/surface.lean \
+            baseline-surface.jsonl "${changed[@]}"
 
       - name: Reuse cache in candidate
         run: cp -a baseline/.lake candidate/.lake
@@ -94,13 +102,18 @@ jobs:
             '${{ steps.revisions.outputs.base }}' '${{ steps.revisions.outputs.candidate }}')
           python3 baseline/bonsai/heartbeats.py candidate "${changed[@]}" \
             --output candidate-heartbeats.json
-          baseline/bonsai/export_surface.sh candidate baseline/bonsai/surface.lean candidate-surface.jsonl
+          python3 baseline/bonsai/complexity.py candidate "${changed[@]}" \
+            --executable baseline/.lake/build/bin/bonsai-measure \
+            --output candidate-complexity.json
+          baseline/bonsai/export_surface.sh candidate baseline/bonsai/surface.lean \
+            candidate-surface.jsonl "${changed[@]}"
 
       - name: Prove score and public theorem surface
         run: |
           python3 baseline/bonsai/compare.py \
             baseline-score.json candidate-score.json \
             baseline-heartbeats.json candidate-heartbeats.json \
+            baseline-complexity.json candidate-complexity.json \
             baseline-surface.jsonl candidate-surface.jsonl \
             --output result.json --markdown report.md
           cat report.md >> "$GITHUB_STEP_SUMMARY"
@@ -115,5 +128,7 @@ jobs:
             report.md
             baseline-heartbeats.json
             candidate-heartbeats.json
+            baseline-complexity.json
+            candidate-complexity.json
           if-no-files-found: error
           retention-days: 30

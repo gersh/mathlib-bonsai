@@ -53,12 +53,27 @@ operator is one unit. The versioned implementation in `bonsai/scorer.py` is auth
 
 Why units? They reward deleting proof steps, applications, binders, and repeated terms without
 rewarding one-letter names. Why ignore layout? Formatting and explanations should remain readable
-without affecting a result. Why not count parsed syntax or kernel expressions? Both are affected by
-extensible macros and elaboration internals, making the season harder to reproduce and audit.
+without affecting a result. Parsed syntax and kernel expressions are measured too, but as
+non-regression guards rather than the primary score: their extensibility and elaboration internals
+make them less suitable for the season's headline ranking.
+
+### Syntax and kernel-expression guards
+
+For the union of changed Lean paths, trusted CI parses and elaborates each baseline and candidate
+file with the fixed Lean frontend. It counts nodes in the raw parsed syntax tree, excluding ordinary
+comments and documentation-comment subtrees. It also counts nodes in the types and values of all
+kernel declarations produced while elaborating each file, including theorem proof values and
+generated helpers. The candidate total for each metric may equal or improve the baseline total, but
+may not increase it.
+
+The syntax count catches ordinary macro packing; the kernel count catches expansion hidden behind
+macros, tactics, and elaborators. Equality is allowed because a useful source cleanup such as
+`by exact p` to `p` can elaborate to exactly the same proof expression. These are affected-file
+guards, not global leaderboard scores.
 
 ### Elaboration-heartbeat requirement
 
-An entry must improve two axes: structural units and Lean elaboration heartbeats. CI takes the union
+An entry must strictly improve structural units and Lean elaboration heartbeats. CI takes the union
 of changed Lean source paths and elaborates each file sequentially in both the baseline and candidate
 with `Elab.async` disabled. It sums Lean's internal allocation-based heartbeat counter. The
 candidate must reduce that affected-file total by more than one user-facing heartbeat (1,000
@@ -82,13 +97,16 @@ Mathlib theorem from Lean's environment. Baseline and candidate must have the sa
 - fully elaborated theorem types, compared using a 256-bit structural fingerprint after universe
   parameters are canonically numbered and non-semantic expression metadata is erased;
 - public axiom declarations originating in Mathlib.
+- the kind, elaborated type, and value (when one exists) of every public non-theorem Mathlib
+  declaration.
 
 Private names and names Lean marks as generated implementation details (for example `_proof_1`,
 `match_2`, or `_sizeOf_3`) are excluded. These auxiliaries are deliberately unstable when proof
 bodies change and are not a supported theorem surface.
 
-The theorem proof value is not compared. Definitions, tactics, notation, attributes, instances,
-documentation, runtime performance, and non-theorem declarations are outside the formal surface
+The theorem proof value is not compared. Public definitions and other non-theorem declarations are
+frozen so their meanings cannot be weakened to trivialize proofs. Tactics, notation, attributes,
+documentation, private generated details, and runtime behavior remain outside the formal surface
 check except where they are needed to build and state the preserved theorems.
 
 ## 4. Soundness
@@ -103,10 +121,12 @@ reading untracked files, or code generation that changes the built theorem libra
 
 Comments, identifier spellings, literal payload, environment variables, and file names may not be
 used as encoded proof programs. New syntax, macros, or tactics whose purpose is to pack many proof
-operations into an undercounted token are likewise ineligible. The checker uses token limits,
-literal-inventory monotonicity, a strict heartbeat improvement, a fixed dependency graph, isolated
-trusted comparison, and human review as defense in depth; passing automation does not legalize an
-evasion of these rules. Resetting or forging Lean's heartbeat counter is itself an evasion.
+operations into an undercounted token are likewise ineligible. Adding or repurposing syntax,
+macros, tactics, command elaborators, or term elaborators is infrastructure work and must be proposed
+separately. The checker uses token limits, literal-inventory monotonicity, syntax and kernel
+non-regression, a strict heartbeat improvement, a fixed dependency graph, isolated trusted
+comparison, and human review as defense in depth; passing automation does not legalize an evasion of
+these rules. Resetting or forging Lean's heartbeat counter is itself an evasion.
 
 ## 5. Pull requests
 
@@ -114,13 +134,21 @@ An entry should state:
 
 - its claimed structural-unit saving;
 - its affected-file heartbeat saving;
+- its expected syntax-node and kernel-expression changes;
 - the files and main theorems affected;
 - the idea behind the shorter proof;
 - any meaningful tradeoff in readability, elaboration time, or reuse.
 
 CI compares against the PR's base commit, so accepted entries compose. If another entry lands first,
-rebase and let the score run again. Maintainers may decline mechanically hostile obfuscation, severe
-performance regressions, licensing problems, or techniques that violate the intent above.
+update the branch and let the score run again. Maintainers may decline mechanically hostile
+obfuscation, licensing problems, or techniques that violate the intent above.
+
+Maintainers review PRs in the order they first become both centrally eligible and review-ready.
+After approval, GitHub auto-merge may merge a PR only when it is current and verified. It keeps its
+place while it updates cleanly and remains eligible. A merge conflict or loss of strict improvement
+removes it from the merge-ready line; a revised entry rejoins at the back. There is no repair window
+that blocks later entries. Maintainers do not resolve substantive conflicts by moving ideas between
+contributors' PRs, though the discussion record may credit independent discoveries.
 
 ## 6. Ties and records
 
@@ -131,7 +159,9 @@ recorded in discussion even if only one can lower the branch.
 
 ## 7. Changing the rules
 
-Rule and checker changes are maintainer PRs and never contest entries. They require CODEOWNER review.
-A checker fix may invalidate an open result, but accepted commits are not silently rewritten. A new
-Mathlib or Lean baseline starts a named season so scores from different public surfaces are never
-presented as directly comparable.
+Mathlib Bonsai is an experiment. Rule and checker changes are maintainer PRs and never contest
+entries. They require CODEOWNER review. A checker fix may invalidate an open result, but accepted
+commits are not silently rewritten. A new Mathlib or Lean baseline starts a named season so scores
+from different public surfaces are never presented as directly comparable. AI-assisted migration is
+allowed when updating a season, but the proposed baseline must pass the complete reproducibility,
+surface, soundness, and metric audit before competition resumes.

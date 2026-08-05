@@ -1,7 +1,7 @@
 name: Mathlib Bonsai
 
 on:
-  pull_request_target:
+  pull_request:
     types: [opened, synchronize, reopened, ready_for_review]
 
 concurrency:
@@ -19,14 +19,14 @@ jobs:
     timeout-minutes: 120
     steps:
       - name: Check out trusted base
-        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ github.event.pull_request.base.sha }}
           fetch-depth: 1
           path: baseline
 
       - name: Check out candidate source for the changed-file set
-        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: ${{ github.event.pull_request.head.repo.full_name }}
           ref: ${{ github.event.pull_request.head.sha }}
@@ -58,6 +58,10 @@ jobs:
         working-directory: baseline
         run: lake exe cache --repo=leanprover-community/mathlib4 get
 
+      - name: Build trusted complexity meter
+        working-directory: baseline
+        run: lake build bonsai-measure
+
       - name: Measure trusted baseline
         env:
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
@@ -67,7 +71,11 @@ jobs:
           mapfile -d '' changed < <(git -C candidate-source diff --no-renames --name-only -z "$BASE_SHA" "$HEAD_SHA")
           python3 baseline/bonsai/heartbeats.py baseline "${changed[@]}" \
             --output baseline-heartbeats.json
-          baseline/bonsai/export_surface.sh baseline baseline/bonsai/surface.lean baseline-surface.jsonl
+          python3 baseline/bonsai/complexity.py baseline "${changed[@]}" \
+            --executable baseline/.lake/build/bin/bonsai-measure \
+            --output baseline-complexity.json
+          baseline/bonsai/export_surface.sh baseline baseline/bonsai/surface.lean \
+            baseline-surface.jsonl "${changed[@]}"
 
       - name: Upload sealed baseline measurements
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
@@ -76,6 +84,7 @@ jobs:
           path: |
             baseline-score.json
             baseline-heartbeats.json
+            baseline-complexity.json
             baseline-surface.jsonl
           if-no-files-found: error
           retention-days: 1
@@ -87,14 +96,14 @@ jobs:
     timeout-minutes: 120
     steps:
       - name: Check out trusted base tooling
-        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ github.event.pull_request.base.sha }}
           fetch-depth: 1
           path: baseline
 
       - name: Check out untrusted candidate
-        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: ${{ github.event.pull_request.head.repo.full_name }}
           ref: ${{ github.event.pull_request.head.sha }}
@@ -129,6 +138,10 @@ jobs:
         working-directory: baseline
         run: lake exe cache --repo=leanprover-community/mathlib4 get
 
+      - name: Build trusted complexity meter
+        working-directory: baseline
+        run: lake build bonsai-measure
+
       - name: Reuse cache in candidate
         run: cp -a baseline/.lake candidate/.lake
 
@@ -153,7 +166,11 @@ jobs:
           mapfile -d '' changed < <(git -C candidate diff --no-renames --name-only -z "$BASE_SHA" "$HEAD_SHA")
           python3 baseline/bonsai/heartbeats.py candidate "${changed[@]}" \
             --output candidate-heartbeats.json
-          baseline/bonsai/export_surface.sh candidate baseline/bonsai/surface.lean candidate-surface.jsonl
+          python3 baseline/bonsai/complexity.py candidate "${changed[@]}" \
+            --executable baseline/.lake/build/bin/bonsai-measure \
+            --output candidate-complexity.json
+          baseline/bonsai/export_surface.sh candidate baseline/bonsai/surface.lean \
+            candidate-surface.jsonl "${changed[@]}"
 
       - name: Recheck source integrity after import
         run: |
@@ -168,6 +185,7 @@ jobs:
           name: candidate-measurements
           path: |
             candidate-heartbeats.json
+            candidate-complexity.json
             candidate-surface.jsonl
           if-no-files-found: error
           retention-days: 1
@@ -180,14 +198,14 @@ jobs:
     timeout-minutes: 15
     steps:
       - name: Check out trusted comparison code
-        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ github.event.pull_request.base.sha }}
           fetch-depth: 1
           path: trusted
 
       - name: Check out candidate source for independent scoring
-        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: ${{ github.event.pull_request.head.repo.full_name }}
           ref: ${{ github.event.pull_request.head.sha }}
@@ -219,6 +237,7 @@ jobs:
           python3 trusted/bonsai/compare.py \
             baseline-score.json candidate-score.json \
             baseline-heartbeats.json candidate-heartbeats.json \
+            baseline-complexity.json candidate-complexity.json \
             baseline-surface.jsonl candidate-surface.jsonl \
             --output result.json --markdown report.md || status=$?
           cat report.md >> "$GITHUB_STEP_SUMMARY"

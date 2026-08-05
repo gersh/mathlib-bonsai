@@ -7,6 +7,7 @@ import unittest
 
 from bonsai.scorer import ScoreError, count_units, measure_source, score_repository
 from bonsai.check_policy import allowed
+from bonsai.compare import compare_surfaces, load_surface
 from bonsai.heartbeats import HeartbeatError, measure_repository, validate_relative_path
 
 
@@ -105,6 +106,8 @@ class ComparisonTests(unittest.TestCase):
         *,
         candidate_heartbeats: int = 8_000,
         candidate_inventory: dict[str, int] | None = None,
+        candidate_syntax_nodes: int = 90,
+        candidate_kernel_nodes: int = 100,
     ) -> subprocess.CompletedProcess[str]:
         baseline_inventory = {"0" * 64: 1}
         common = {
@@ -148,6 +151,26 @@ class ComparisonTests(unittest.TestCase):
             "total": candidate_heartbeats,
             "files": {"Mathlib.lean": candidate_heartbeats},
         }), encoding="utf-8")
+        complexity_common = {
+            "schema": 1,
+            "metric": "lean-affected-file-complexity-v1",
+        }
+        (directory / "baseline-complexity.json").write_text(json.dumps(complexity_common | {
+            "syntaxNodes": 100,
+            "kernelExpressionNodes": 100,
+            "files": {"Mathlib.lean": {
+                "syntaxNodes": 100,
+                "kernelExpressionNodes": 100,
+            }},
+        }), encoding="utf-8")
+        (directory / "candidate-complexity.json").write_text(json.dumps(complexity_common | {
+            "syntaxNodes": candidate_syntax_nodes,
+            "kernelExpressionNodes": candidate_kernel_nodes,
+            "files": {"Mathlib.lean": {
+                "syntaxNodes": candidate_syntax_nodes,
+                "kernelExpressionNodes": candidate_kernel_nodes,
+            }},
+        }), encoding="utf-8")
         return subprocess.run(
             [
                 sys.executable,
@@ -157,6 +180,8 @@ class ComparisonTests(unittest.TestCase):
                 "candidate-score.json",
                 "baseline-heartbeats.json",
                 "candidate-heartbeats.json",
+                "baseline-complexity.json",
+                "candidate-complexity.json",
                 "baseline-surface.jsonl",
                 "candidate-surface.jsonl",
                 "--output",
@@ -203,6 +228,44 @@ class ComparisonTests(unittest.TestCase):
             self.assertEqual(completed.returncode, 1)
             result = json.loads((root / "result.json").read_text(encoding="utf-8"))
             self.assertFalse(result["heartbeatsImproved"])
+
+    def test_syntax_nodes_may_not_increase(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            completed = self._run_comparison(root, candidate_payload=5, candidate_syntax_nodes=101)
+            self.assertEqual(completed.returncode, 1)
+            result = json.loads((root / "result.json").read_text(encoding="utf-8"))
+            self.assertFalse(result["syntaxNonincreasing"])
+
+    def test_kernel_expression_nodes_may_not_increase(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            completed = self._run_comparison(root, candidate_payload=5, candidate_kernel_nodes=101)
+            self.assertEqual(completed.returncode, 1)
+            result = json.loads((root / "result.json").read_text(encoding="utf-8"))
+            self.assertFalse(result["kernelExpressionNonincreasing"])
+
+    def test_public_non_theorem_implementation_may_not_change(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            prefix = '\n'.join((
+                '{"schema":1,"rootModule":"Mathlib"}',
+                '{"kind":"implementation","declaration":'
+                '{"name":"Mathlib.example","valueFingerprint":["old"]}}',
+                '{"kind":"end","forbiddenAxioms":[]}',
+                "",
+            ))
+            changed = prefix.replace('["old"]', '["new"]')
+            baseline_path = root / "baseline.jsonl"
+            candidate_path = root / "candidate.jsonl"
+            baseline_path.write_text(prefix, encoding="utf-8")
+            candidate_path.write_text(changed, encoding="utf-8")
+            result = compare_surfaces(
+                load_surface(baseline_path), load_surface(candidate_path),
+                baseline_path, candidate_path,
+            )
+            self.assertFalse(result["compatible"])
+            self.assertTrue(result["implementationsChanged"])
 
 
 class HeartbeatTests(unittest.TestCase):

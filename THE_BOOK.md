@@ -23,9 +23,10 @@ mathematical character:
 - several proofs reveal a shared abstraction;
 - automation becomes effective after the statement is put in its natural form.
 
-Not every reduction is profound. Renaming a local variable saves characters. A lucky tactic may
-compress an argument without explaining it. Those are valid golf, but the project becomes valuable
-when the leaderboard points reviewers toward a proof worth understanding.
+Not every reduction is profound. A lucky tactic may compress an argument without explaining it.
+The structural score deliberately gives no reward for shortening identifier spellings, but concise
+automation is still valid when it passes the complexity and heartbeat guards. The project becomes
+valuable when the leaderboard points reviewers toward a proof worth understanding.
 
 ## The score is a probe, not an aesthetic theory
 
@@ -55,6 +56,12 @@ before-and-after proof essays, alternative minimal proofs, and explanations of t
 made large families of theorems collapse. The dream is not a minified Mathlib nobody can read. It is
 to use the pressure of minification to discover a Mathlib whose proofs say more with less—and then to
 write down what they taught us.
+
+Mathlib Bonsai is an experiment in whether these measurements are useful. Its rules should be
+criticized, tested, and revised between seasons rather than mistaken for a final account of beauty.
+Some of its best results may deserve upstream Mathlib proposals; some will remain instructive golf.
+Periodic AI-assisted migrations to newer Mathlib and Lean versions can start new seasons, provided
+each new baseline is frozen and audited before scores resume.
 
 ## Further reading
 

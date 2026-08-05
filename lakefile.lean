@@ -152,6 +152,11 @@ lean_exe «nightly-testing-checklist» where
 lean_exe mathlib_test_executable where
   root := `MathlibTest.MathlibTestExecutable
 
+/-- Trusted parser, kernel-expression, and heartbeat measurement for Mathlib Bonsai. -/
+lean_exe «bonsai-measure» where
+  root := `bonsai.Measure
+  supportInterpreter := true
+
 /-!
 ## Other configuration
 -/

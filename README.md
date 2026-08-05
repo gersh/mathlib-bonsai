@@ -2,10 +2,14 @@
 
 **Cultivating smaller proofs in search of THE BOOK.**
 
-Mathlib Bonsai is a continuous competition to make Mathlib's proofs smaller without changing the
-public theorem surface. The default branch is the reigning entry. Open a pull request containing a
-smaller implementation; GitHub Actions builds it, compares every public theorem name and elaborated
-type with the PR's base commit, checks its axioms, and reports the structural-unit delta.
+Mathlib Bonsai is an experimental continuous competition to make Mathlib's proofs smaller without
+changing the public theorem surface. The default branch is the reigning entry. Open a pull request
+containing a smaller implementation; GitHub Actions builds it, compares every public theorem name
+and elaborated type with the PR's base commit, checks its axioms, and reports the structural-unit
+delta.
+
+This is a new experiment, not a finished theory of proof quality. Metrics and safeguards may improve
+between explicitly versioned seasons; results within a season keep one fixed contract.
 
 The frozen starting point is
 [`leanprover-community/mathlib4@b2418b0`](https://github.com/leanprover-community/mathlib4/commit/b2418b04047e1da8b7dd99534965d44fc1de9288),
@@ -47,7 +51,8 @@ Read [THE_BOOK.md](THE_BOOK.md) for the full vision.
 
 A PR is eligible to merge when it builds with warnings as errors, has an exact public theorem
 surface, uses only Lean's accepted foundational axioms, has a strictly lower structural score, and
-measurably reduces elaboration heartbeats across the files it changes.
+measurably reduces elaboration heartbeats across the files it changes. Its parsed syntax-node and
+elaborated kernel-expression counts over those files must also not increase.
 Several proofs may be improved in one PR, though small, well-explained entries are easier to review.
 
 ```bash
@@ -80,7 +85,9 @@ renaming `longLocalName` to `x` saves nothing.
 Existing literals may remain or be deleted, but their exact spellings cannot be added or changed;
 unusually large identifiers/operators are rejected, and raw character count is diagnostic only.
 Every entry must also reduce affected-file elaboration heartbeats beyond a small deterministic-noise
-allowance. Together with a fixed toolchain, exact
+allowance. Parsed syntax nodes and elaborated kernel `Expr` nodes are non-regression guards: the
+former exposes ordinary macro packing, while the latter exposes complexity hidden by macros,
+tactics, or elaborators. Documentation comments remain free. Together with a fixed toolchain, exact
 theorem-surface comparison, axiom auditing, a scored-tree-only change policy, isolated trusted CI,
 and human review, this blocks the obvious packing and generated-code shortcuts. Tests,
 documentation, competition infrastructure, and generated `.olean` files are unscored and cannot be
@@ -96,10 +103,38 @@ their unstable names are not a supported user surface.
 Public Mathlib axioms must also remain identical, and proof dependencies may not introduce an axiom
 outside `propext`, `Quot.sound`, and `Classical.choice`.
 
+Public non-theorem declarations are frozen more strongly: their elaborated types and, where present,
+their values must match. Thus an entry cannot make a definition trivial while leaving theorem types
+spelled the same. The only public declaration bodies intended to vary are theorem proofs.
+
 This is specifically a **public theorem-surface** competition. It does not promise binary or source
-compatibility for every public definition, notation, attribute, tactic, or runtime behavior. See
-[RULES.md](RULES.md) before relying on a loophole: semantic evasions are ineligible even when a
+compatibility for notation, attributes, tactics, generated private details, or runtime behavior.
+See [RULES.md](RULES.md) before relying on a loophole: semantic evasions are ineligible even when a
 checker happens not to catch them yet.
+
+## Merge order and conflicts
+
+Maintainers review entries in the order they first become centrally eligible and review-ready.
+After approval, native GitHub auto-merge may merge an entry once its trusted check is green against
+current `main`. A PR keeps that position only while it can update cleanly and remains a strict
+improvement. A conflict or a non-winning score removes it from the merge-ready line; after revision
+it re-enters with a new ready time. This avoids blocking the contest or letting an old stalled PR
+absorb later work. PR history still records credit for independent discoveries.
+
+## From Bonsai back to Mathlib
+
+Especially clear, reusable improvements may be good candidates for upstream Mathlib. Maintainers
+and authors can collaborate on an upstream PR with the Bonsai contributor credited. Competition
+acceptance does not imply upstream acceptance: Mathlib appropriately makes its own judgments about
+style, generality, performance, and maintenance.
+
+## Seasons
+
+The project may periodically move to a newer Mathlib commit and Lean toolchain. Each migration
+starts a named season with a new frozen surface and baseline score, so unlike scores are never
+compared. AI-assisted bulk migration and compatibility repair are welcome, but the resulting
+baseline must pass the same reproducible build, surface, soundness, and metric audit before the
+season opens.
 
 ## License and attribution
 

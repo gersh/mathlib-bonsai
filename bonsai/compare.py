@@ -67,9 +67,32 @@ def validate_heartbeats(value: object, path: Path) -> dict[str, object]:
     return value
 
 
+def validate_complexity(value: object, path: Path) -> dict[str, object]:
+    if not isinstance(value, dict):
+        raise ValueError(f"{path}: invalid complexity manifest")
+    if value.get("schema") != 1 or value.get("metric") != "lean-affected-file-complexity-v1":
+        raise ValueError(f"{path}: unsupported complexity manifest")
+    files = value.get("files")
+    if not isinstance(files, dict) or not files:
+        raise ValueError(f"{path}: missing per-file complexity counts")
+    for name, counts in files.items():
+        if not isinstance(name, str) or not isinstance(counts, dict):
+            raise ValueError(f"{path}: invalid per-file complexity counts")
+        if any(not isinstance(counts.get(key), int) or counts[key] < 0
+               for key in ("syntaxNodes", "kernelExpressionNodes")):
+            raise ValueError(f"{path}: invalid per-file complexity counts")
+    for key in ("syntaxNodes", "kernelExpressionNodes"):
+        if not isinstance(value.get(key), int) or value[key] != sum(
+            counts[key] for counts in files.values()
+        ):
+            raise ValueError(f"{path}: {key} total does not match per-file counts")
+    return value
+
+
 def load_surface(path: Path) -> dict[str, object]:
     """Load the streaming JSON-lines format emitted by bonsai/surface.lean."""
     result: dict[str, object] = {"schema": None, "theorems": [], "axioms": [],
+                                 "implementations": [],
                                  "forbiddenAxioms": None}
     with path.open(encoding="utf-8") as stream:
         for number, line in enumerate(stream, 1):
@@ -85,11 +108,15 @@ def load_surface(path: Path) -> dict[str, object]:
                 result["schema"] = 1
                 continue
             kind = record.get("kind")
-            if kind in {"theorem", "axiom"}:
+            if kind in {"theorem", "axiom", "implementation"}:
                 declaration = record.get("declaration")
                 if not isinstance(declaration, dict):
                     raise ValueError(f"{path}:{number}: invalid declaration")
-                target = "theorems" if kind == "theorem" else "axioms"
+                target = {
+                    "theorem": "theorems",
+                    "axiom": "axioms",
+                    "implementation": "implementations",
+                }[kind]
                 assert isinstance(result[target], list)
                 result[target].append(declaration)
             elif kind == "end":
@@ -118,6 +145,20 @@ def keyed_surface(value: object, path: Path) -> dict[str, dict[str, object]]:
     return result
 
 
+def keyed_declarations(value: object, key: str, path: Path) -> dict[str, dict[str, object]]:
+    declarations = value.get(key) if isinstance(value, dict) else None
+    if not isinstance(declarations, list):
+        raise ValueError(f"{path}: missing {key} list")
+    result: dict[str, dict[str, object]] = {}
+    for item in declarations:
+        if not isinstance(item, dict) or not isinstance(item.get("name"), str):
+            raise ValueError(f"{path}: invalid {key} entry")
+        if item["name"] in result:
+            raise ValueError(f"{path}: duplicate declaration {item['name']}")
+        result[item["name"]] = item
+    return result
+
+
 def compare_surfaces(baseline: object, candidate: object, baseline_path: Path,
                      candidate_path: Path) -> dict[str, object]:
     old = keyed_surface(baseline, baseline_path)
@@ -135,14 +176,22 @@ def compare_surfaces(baseline: object, candidate: object, baseline_path: Path,
         item.get("name"): item for item in new_axiom_entries
     } if isinstance(new_axiom_entries, list) else None
     axioms_changed = old_axioms != new_axioms
+    old_implementations = keyed_declarations(baseline, "implementations", baseline_path)
+    new_implementations = keyed_declarations(candidate, "implementations", candidate_path)
+    implementations_changed = old_implementations != new_implementations
     candidate_forbidden = candidate.get("forbiddenAxioms") if isinstance(candidate, dict) else None
-    forbidden = candidate_forbidden if isinstance(candidate_forbidden, list) else ["invalid manifest"]
+    forbidden = (
+        candidate_forbidden if isinstance(candidate_forbidden, list) else ["invalid manifest"]
+    )
     return {
-        "compatible": not (removed or added or changed or axioms_changed or forbidden),
+        "compatible": not (
+            removed or added or changed or axioms_changed or implementations_changed or forbidden
+        ),
         "removed": removed,
         "added": added,
         "changed": changed,
         "axiomsChanged": axioms_changed,
+        "implementationsChanged": implementations_changed,
         "forbiddenAxioms": forbidden,
         "baselineTheorems": len(old),
         "candidateTheorems": len(new),
@@ -155,6 +204,8 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("candidate_score", type=Path)
     parser.add_argument("baseline_heartbeats", type=Path)
     parser.add_argument("candidate_heartbeats", type=Path)
+    parser.add_argument("baseline_complexity", type=Path)
+    parser.add_argument("candidate_complexity", type=Path)
     parser.add_argument("baseline_surface", type=Path)
     parser.add_argument("candidate_surface", type=Path)
     parser.add_argument("--output", type=Path)
@@ -172,6 +223,16 @@ def main(argv: list[str] | None = None) -> int:
         )
         if baseline_heartbeats["files"].keys() != candidate_heartbeats["files"].keys():
             raise ValueError("baseline and candidate heartbeat file sets differ")
+        baseline_complexity = validate_complexity(
+            load_json(args.baseline_complexity), args.baseline_complexity
+        )
+        candidate_complexity = validate_complexity(
+            load_json(args.candidate_complexity), args.candidate_complexity
+        )
+        if baseline_complexity["files"].keys() != candidate_complexity["files"].keys():
+            raise ValueError("baseline and candidate complexity file sets differ")
+        if baseline_complexity["files"].keys() != baseline_heartbeats["files"].keys():
+            raise ValueError("complexity and heartbeat file sets differ")
         baseline_surface = load_surface(args.baseline_surface)
         candidate_surface = load_surface(args.candidate_surface)
         old_total = int(baseline_score["total"])
@@ -200,6 +261,12 @@ def main(argv: list[str] | None = None) -> int:
     heartbeat_file_count = len(baseline_heartbeats["files"])
     heartbeat_tolerance = 1000 * heartbeat_file_count
     heartbeats_improved = new_heartbeats + heartbeat_tolerance < old_heartbeats
+    old_syntax_nodes = int(baseline_complexity["syntaxNodes"])
+    new_syntax_nodes = int(candidate_complexity["syntaxNodes"])
+    old_kernel_nodes = int(baseline_complexity["kernelExpressionNodes"])
+    new_kernel_nodes = int(candidate_complexity["kernelExpressionNodes"])
+    syntax_safe = new_syntax_nodes <= old_syntax_nodes
+    kernel_safe = new_kernel_nodes <= old_kernel_nodes
     result = {
         "schema": 2,
         "metric": "lean-structural-source-units-v1",
@@ -218,6 +285,14 @@ def main(argv: list[str] | None = None) -> int:
         "heartbeatDelta": new_heartbeats - old_heartbeats,
         "heartbeatTolerance": heartbeat_tolerance,
         "heartbeatsImproved": heartbeats_improved,
+        "baselineSyntaxNodes": old_syntax_nodes,
+        "candidateSyntaxNodes": new_syntax_nodes,
+        "syntaxNodeDelta": new_syntax_nodes - old_syntax_nodes,
+        "syntaxNonincreasing": syntax_safe,
+        "baselineKernelExpressionNodes": old_kernel_nodes,
+        "candidateKernelExpressionNodes": new_kernel_nodes,
+        "kernelExpressionNodeDelta": new_kernel_nodes - old_kernel_nodes,
+        "kernelExpressionNonincreasing": kernel_safe,
         "smaller": new_total < old_total,
         "surface": surface,
         "accepted": (
@@ -225,6 +300,8 @@ def main(argv: list[str] | None = None) -> int:
             and payload_safe
             and inventory_safe
             and heartbeats_improved
+            and syntax_safe
+            and kernel_safe
             and bool(surface["compatible"])
         ),
     }
@@ -239,6 +316,10 @@ def main(argv: list[str] | None = None) -> int:
     status = "✅ eligible" if result["accepted"] else "❌ not eligible"
     heartbeat_delta = new_heartbeats - old_heartbeats
     heartbeat_sign = "+" if heartbeat_delta >= 0 else ""
+    syntax_delta = new_syntax_nodes - old_syntax_nodes
+    syntax_sign = "+" if syntax_delta >= 0 else ""
+    kernel_delta = new_kernel_nodes - old_kernel_nodes
+    kernel_sign = "+" if kernel_delta >= 0 else ""
     markdown = (
         "## Mathlib Bonsai result\n\n"
         "| Check | Result |\n|---|---:|\n"
@@ -247,9 +328,13 @@ def main(argv: list[str] | None = None) -> int:
         f"| Change | {sign}{delta:,} structural units |\n"
         f"| Literal guard | {'no additions/changes' if inventory_safe else 'new or changed literal'}; "
         f"payload {payload_sign}{payload_delta:,} scalars |\n"
+        f"| Parsed syntax nodes | {syntax_sign}{syntax_delta:,} "
+        f"({'non-increasing' if syntax_safe else 'increased'}) |\n"
+        f"| Kernel expression nodes | {kernel_sign}{kernel_delta:,} "
+        f"({'non-increasing' if kernel_safe else 'increased'}) |\n"
         f"| Affected-file heartbeats | {heartbeat_sign}{heartbeat_delta / 1000:,.3f} "
         f"({'improved' if heartbeats_improved else 'not a measurable reduction'}) |\n"
-        f"| Public theorem surface | {'exact match' if surface['compatible'] else 'changed'} |\n"
+        f"| Public theorem/API surface | {'exact match' if surface['compatible'] else 'changed'} |\n"
         f"| Verdict | {status} |\n"
     )
     if not surface["compatible"]:
@@ -263,6 +348,8 @@ def main(argv: list[str] | None = None) -> int:
                 markdown += "\n"
         if surface["axiomsChanged"]:
             markdown += "\n- the public Mathlib axiom set changed\n"
+        if surface["implementationsChanged"]:
+            markdown += "\n- a public non-theorem declaration changed\n"
     if not payload_safe:
         markdown += (
             "\nLiteral payload increased. Entries may not pack removed proof structure into strings, "
@@ -278,6 +365,12 @@ def main(argv: list[str] | None = None) -> int:
             f"\nAffected-file elaboration must decrease by more than the deterministic-noise "
             f"allowance ({heartbeat_tolerance / 1000:,.0f} heartbeat(s) for "
             f"{heartbeat_file_count} file(s)).\n"
+        )
+    if not syntax_safe:
+        markdown += "\nParsed syntax-tree complexity may not increase across the affected files.\n"
+    if not kernel_safe:
+        markdown += (
+            "\nElaborated kernel-expression complexity may not increase across affected files.\n"
         )
     if args.markdown:
         args.markdown.write_text(markdown, encoding="utf-8")

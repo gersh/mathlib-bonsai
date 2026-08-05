@@ -1,6 +1,7 @@
 {
   "schema": 1,
   "season": 1,
+  "rulesVersion": 2,
   "name": "Mathlib Bonsai: In Search of THE BOOK",
   "upstream": "leanprover-community/mathlib4",
   "upstreamCommit": "b2418b04047e1da8b7dd99534965d44fc1de9288",
@@ -8,5 +9,8 @@
   "initialScore": 18900593,
   "initialLiteralPayload": 496392,
   "scoreMetric": "lean-structural-source-units-v1",
+  "syntaxGuard": "lean-raw-syntax-nodes-v1",
+  "kernelExpressionGuard": "lean-kernel-expression-nodes-v1",
+  "heartbeatGuard": "lean-affected-file-elaboration-heartbeats-v1",
   "scoredFiles": 8303
 }

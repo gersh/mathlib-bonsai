@@ -2,7 +2,7 @@ import Mathlib
 import Lean.Util.CollectAxioms
 
 /-!
-Emit a deterministic manifest of the public theorems exposed by `import Mathlib`.
+Emit a deterministic manifest of the public declarations exposed by `import Mathlib`.
 
 This file is trusted competition infrastructure. CI always executes the version
 from the PR's base commit against both the base and candidate builds.
@@ -69,6 +69,12 @@ private def isMathlibDeclaration (environment : Environment) (name : Name) : Boo
   | some moduleName => moduleName == `Mathlib || (`Mathlib).isPrefixOf moduleName
   | none => false
 
+private def isChangedDeclaration (environment : Environment) (changedModules : Std.HashSet Name)
+    (name : Name) : Bool :=
+  match environment.getModuleFor? name with
+  | some moduleName => changedModules.contains moduleName
+  | none => false
+
 private def theoremJson (name : Name) (levels : List Name) (type : Expr) : Json :=
   json% {
     name : $(name.toString),
@@ -76,10 +82,35 @@ private def theoremJson (name : Name) (levels : List Name) (type : Expr) : Json 
     typeFingerprint : $(typeFingerprint levels type)
   }
 
+private def implementationKind : ConstantInfo → String
+  | .defnInfo _ => "definition"
+  | .opaqueInfo _ => "opaque"
+  | .quotInfo _ => "quotient"
+  | .inductInfo _ => "inductive"
+  | .ctorInfo _ => "constructor"
+  | .recInfo _ => "recursor"
+  | .axiomInfo _ => "axiom"
+  | .thmInfo _ => "theorem"
+
+private def implementationJson (info : ConstantInfo) : Json :=
+  let valueFingerprint : Json := match info.value? (allowOpaque := true) with
+    -- `Expr` caches its structural hash, so this remains tractable over all public definitions.
+    -- The independent affected-file kernel-node guard and human review provide additional defense.
+    | some value => toJson (toString (hash value))
+    | none => Json.null
+  json% {
+    name : $(info.name.toString),
+    declarationKind : $(implementationKind info),
+    universeArity : $(info.levelParams.length),
+    typeFingerprint : $(typeFingerprint info.levelParams info.type),
+    valueFingerprint : $valueFingerprint
+  }
+
 private def permittedAxiom (name : Name) : Bool :=
   name == ``propext || name == ``Quot.sound || name == ``Classical.choice
 
-private def writeManifest (environment : Environment) (output : String) : CoreM Unit := do
+private def writeManifest (environment : Environment) (changedModules : Std.HashSet Name)
+    (output : String) : CoreM Unit := do
   let handle ← IO.FS.Handle.mk output .write
   handle.putStrLn <| (json% { schema : 1, rootModule : "Mathlib" }).compress
   let mut forbiddenAxioms : Std.HashSet Name := {}
@@ -101,7 +132,12 @@ private def writeManifest (environment : Environment) (output : String) : CoreM 
           kind : "axiom",
           declaration : $(theoremJson name value.levelParams value.type)
         }).compress
-    | _ => pure ()
+    | _ =>
+        if isChangedDeclaration environment changedModules name then
+          handle.putStrLn <| (json% {
+            kind : "implementation",
+            declaration : $(implementationJson info)
+          }).compress
   let forbidden := forbiddenAxioms.toArray.qsort fun left right => left.toString < right.toString
   handle.putStrLn <| (json% {
     kind : "end",
@@ -112,5 +148,7 @@ end MathlibBonsai
 
 run_cmd do
   let output := (← IO.getEnv "GOLF_SURFACE_OUT").getD "surface.jsonl"
+  let changedModules := ((← IO.getEnv "BONSAI_CHANGED_MODULES").getD "").splitOn ";"
+    |>.foldl (fun modules value => if value.isEmpty then modules else modules.insert value.toName) {}
   let environment ← getEnv
-  liftCoreM <| MathlibBonsai.writeManifest environment output
+  liftCoreM <| MathlibBonsai.writeManifest environment changedModules output

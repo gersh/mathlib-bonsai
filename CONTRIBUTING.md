@@ -17,6 +17,8 @@ Push the branch to your fork, enable GitHub Actions there if prompted, and run t
 proof** workflow with your branch selected. It compares your commit with the reigning
 `gersh/mathlib-bonsai:main`, uploads the complete result, and must pass before submission. The PR
 workflow repeats the proof independently as the authoritative merge gate.
+For a contributor's first PR, GitHub may ask a maintainer to approve the read-only central workflow
+run. This approval starts verification; it is not approval of the code or of the eventual merge.
 
 Only `Mathlib.lean` and `.lean` files under `Mathlib/` may change in an entry. This is both a security
 boundary and what prevents moving implementation into an unscored script or dependency. If the
@@ -36,6 +38,31 @@ disabled. A winning entry must reduce that affected-file heartbeat total by more
 one-heartbeat-per-file noise allowance. This is deliberately a Pareto competition: shorter source
 that makes elaboration slower does not merge.
 
+CI also counts raw parsed syntax nodes (excluding documentation comments) and elaborated kernel
+expression nodes for the affected files. Neither count may increase. This permits cleanups that
+elaborate to the same proof term while rejecting source compression that merely expands into more
+syntax or kernel work. New or repurposed syntax, macros, tactics, and elaborators are not contest
+entries; propose them separately for maintainer review.
+
+## Concurrent entries and conflicts
+
+Start from current `main` and keep the branch current. Maintainers review entries in the order they
+first become both centrally eligible and review-ready. An approved PR may use GitHub auto-merge, but
+it remains merge-ready only while it updates cleanly and still beats the reigning score. If an
+earlier entry lands and your branch conflicts or no longer improves the score, revise it and rerun
+Submission proof; the revised entry rejoins the back of the ready line. There is no repair window
+that blocks later contributors.
+
+For overlapping ideas, link the other PR and explain what is independent. GitHub discussion keeps
+the attribution even when only one version can be the next strict record. Maintainers should not
+resolve a contributor's substantive proof conflict by copying work from another queued entry.
+
+## Possible upstream contribution
+
+If a win is clear, reusable, and consistent with Mathlib style, the author and maintainers may
+propose it to `leanprover-community/mathlib4`. Credit the Bonsai author and link the competition PR.
+Upstream Mathlib decides independently whether the change belongs there.
+
 ## Maintainer setup
 
 After pushing this repository to GitHub:
@@ -48,6 +75,8 @@ After pushing this repository to GitHub:
    trusted reporter receives only `actions: read` and `pull-requests: write`.
 5. The reporter creates and maintains the `bonsai:eligible` and `bonsai:invalid` labels. Add an
    `infrastructure` label for non-entry work.
+6. Enable native auto-merge and the update-branch button. Use auto-merge only after maintainer
+   approval; branch-up-to-date protection prevents merging until the updated tree is verified.
 
 The split workflow matters: candidate Lean code is untrusted native code. It never runs in a job
 holding a write token or repository secrets. The reporter runs only after the verifier and consumes
