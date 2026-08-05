@@ -1,21 +1,46 @@
 #!/usr/bin/env python3
-"""Count Lean source symbols according to the Mathlib Bonsai rules.
+"""Measure structural Lean source units for Mathlib Bonsai.
 
-The official score is the number of Unicode scalar values in Lean tokens.  Layout
-and all three forms of Lean comments (line, block, and documentation) are free.
-Text inside string/character literals and quoted identifiers is still charged.
+The primary score counts lexical structure, not spelling length. Identifiers,
+keywords, operators, delimiters, and literals each cost one unit. Layout and all
+Lean comment forms are free. Literal payload and non-layout source scalars are
+recorded separately as anti-packing diagnostics.
 """
 
 from __future__ import annotations
 
 import argparse
+from dataclasses import dataclass
 import json
 from pathlib import Path
 import sys
+import unicodedata
+
+
+MAX_IDENTIFIER_SCALARS = 256
+MAX_OPERATOR_SCALARS = 32
+_SINGLETON_DELIMITERS = frozenset("()[]{}⟨⟩,;.")
 
 
 class ScoreError(ValueError):
     """The source cannot be scored unambiguously."""
+
+
+@dataclass(frozen=True)
+class SourceScore:
+    """The three measurements collected from one source string."""
+
+    units: int = 0
+    literal_payload: int = 0
+    source_scalars: int = 0
+
+    def plus(self, *, units: int = 0, literal_payload: int = 0,
+             source_scalars: int = 0) -> "SourceScore":
+        return SourceScore(
+            self.units + units,
+            self.literal_payload + literal_payload,
+            self.source_scalars + source_scalars,
+        )
 
 
 def _raw_string_start(text: str, offset: int) -> tuple[int, str] | None:
@@ -32,19 +57,14 @@ def _raw_string_start(text: str, offset: int) -> tuple[int, str] | None:
 
 
 def _char_literal_end(text: str, offset: int) -> int | None:
-    """Return the end of a syntactically shaped Lean character literal.
-
-    A bare apostrophe is also an identifier-continuation character in Lean, so
-    treating every apostrophe as the start of a literal would mis-score names
-    such as ``x'``.
-    """
+    """Return the end of a syntactically shaped Lean character literal."""
     if text[offset] != "'" or offset + 2 >= len(text):
         return None
     cursor = offset + 1
     if text[cursor] in {"\n", "\r", "'"}:
         return None
     if text[cursor] != "\\":
-        return cursor + 1 if text[cursor + 1] == "'" else None
+        return cursor + 2 if text[cursor + 1] == "'" else None
     cursor += 1
     if cursor >= len(text):
         return None
@@ -60,30 +80,38 @@ def _char_literal_end(text: str, offset: int) -> int | None:
     return cursor + 1 if cursor < len(text) and text[cursor] == "'" else None
 
 
-def count_symbols(text: str, *, source: str = "<string>") -> int:
-    """Count charged Unicode scalar values in one Lean source file."""
+def _identifier_char(char: str) -> bool:
+    """A deliberately broad superset of Lean identifier-continuation chars."""
+    return char in {"_", "'"} or unicodedata.category(char)[0] in {"L", "M", "N"}
+
+
+def _check_token_length(length: int, limit: int, kind: str, source: str) -> None:
+    if length > limit:
+        raise ScoreError(
+            f"{source}: {kind} has {length} scalars; the anti-packing limit is {limit}"
+        )
+
+
+def measure_source(text: str, *, source: str = "<string>") -> SourceScore:
+    """Measure structural units, literal payload, and charged source scalars."""
     if "\r" in text:
         raise ScoreError(f"{source}: use LF line endings")
     if "\x00" in text:
         raise ScoreError(f"{source}: NUL is not valid Lean source")
 
-    count = 0
+    score = SourceScore()
     offset = 0
     size = len(text)
     while offset < size:
         char = text[offset]
 
-        # Layout outside a token is free. Lean itself only accepts spaces and
-        # newlines as layout, but isspace catches invalid layout consistently;
-        # the build is responsible for rejecting invalid Lean.
         if char.isspace():
             offset += 1
             continue
 
-        # This deliberately recognizes a comment marker whenever it occurs in
-        # code, a stricter rule than Lean's "not part of another token" wording.
-        # It prevents custom operator syntax from turning comments into a way to
-        # fool the counter.
+        # Recognize comment markers everywhere outside protected literals. This
+        # keeps custom operator syntax from making the scorer disagree with its
+        # documented comment-removal rule.
         if text.startswith("--", offset):
             newline = text.find("\n", offset + 2)
             offset = size if newline < 0 else newline + 1
@@ -107,22 +135,32 @@ def count_symbols(text: str, *, source: str = "<string>") -> int:
         raw = _raw_string_start(text, offset)
         if raw is not None:
             opening_length, closing = raw
-            end = text.find(closing, offset + opening_length)
+            content_start = offset + opening_length
+            end = text.find(closing, content_start)
             if end < 0:
                 raise ScoreError(f"{source}: unterminated raw string")
             after = end + len(closing)
-            count += after - offset
+            score = score.plus(
+                units=1,
+                # Raw-string hash delimiters are data-bearing spelling too;
+                # charge everything except the fixed r and two quote marks.
+                literal_payload=after - offset - 3,
+                source_scalars=after - offset,
+            )
             offset = after
             continue
 
         char_end = _char_literal_end(text, offset)
         if char_end is not None:
-            count += char_end - offset
+            score = score.plus(
+                units=1,
+                literal_payload=char_end - offset - 2,
+                source_scalars=char_end - offset,
+            )
             offset = char_end
             continue
 
         if char == '"':
-            delimiter = char
             start = offset
             offset += 1
             escaped = False
@@ -133,36 +171,96 @@ def count_symbols(text: str, *, source: str = "<string>") -> int:
                     escaped = False
                 elif current == "\\":
                     escaped = True
-                elif current == delimiter:
+                elif current == '"':
                     break
             else:
-                raise ScoreError(f"{source}: unterminated {delimiter} literal")
-            count += offset - start
+                raise ScoreError(f"{source}: unterminated string literal")
+            score = score.plus(
+                units=1,
+                literal_payload=offset - start - 2,
+                source_scalars=offset - start,
+            )
             continue
 
         if char == "«":
             end = text.find("»", offset + 1)
             if end < 0:
                 raise ScoreError(f"{source}: unterminated quoted identifier")
-            after = end + 1
-            count += after - offset
-            offset = after
+            token_length = end - offset + 1
+            _check_token_length(token_length - 2, MAX_IDENTIFIER_SCALARS,
+                                "quoted identifier", source)
+            score = score.plus(units=1, source_scalars=token_length)
+            offset = end + 1
             continue
 
-        count += 1
+        if char.isdigit():
+            start = offset
+            offset += 1
+            while offset < size and _identifier_char(text[offset]):
+                offset += 1
+            # Keep decimal fractions as one data-bearing literal, while leaving
+            # name separators and range syntax as structural dots.
+            if offset + 1 < size and text[offset] == "." and text[offset + 1].isdigit():
+                offset += 1
+                while offset < size and _identifier_char(text[offset]):
+                    offset += 1
+            token_length = offset - start
+            score = score.plus(
+                units=1,
+                literal_payload=token_length,
+                source_scalars=token_length,
+            )
+            continue
+
+        if _identifier_char(char):
+            start = offset
+            offset += 1
+            while offset < size and _identifier_char(text[offset]):
+                offset += 1
+            token_length = offset - start
+            _check_token_length(token_length, MAX_IDENTIFIER_SCALARS, "identifier", source)
+            score = score.plus(units=1, source_scalars=token_length)
+            continue
+
+        if char in _SINGLETON_DELIMITERS:
+            score = score.plus(units=1, source_scalars=1)
+            offset += 1
+            continue
+
+        start = offset
         offset += 1
+        while offset < size:
+            current = text[offset]
+            if (
+                current.isspace()
+                or _identifier_char(current)
+                or current in _SINGLETON_DELIMITERS
+                or current in {'"', "«"}
+                or text.startswith("--", offset)
+                or text.startswith("/-", offset)
+            ):
+                break
+            offset += 1
+        token_length = offset - start
+        _check_token_length(token_length, MAX_OPERATOR_SCALARS, "operator", source)
+        score = score.plus(units=1, source_scalars=token_length)
 
-    return count
+    return score
 
 
-def score_file(path: Path) -> int:
-    if path.is_symlink():
-        raise ScoreError(f"{path}: symlinks are not allowed in the scored tree")
+def count_units(text: str, *, source: str = "<string>") -> int:
+    """Return only the primary structural-unit score."""
+    return measure_source(text, source=source).units
+
+
+def score_file(path: Path) -> SourceScore:
+    if path.is_symlink() or not path.is_file():
+        raise ScoreError(f"{path}: every scored path must be a regular file")
     try:
         text = path.read_text(encoding="utf-8", errors="strict")
     except UnicodeError as error:
         raise ScoreError(f"{path}: source must be valid UTF-8") from error
-    return count_symbols(text, source=str(path))
+    return measure_source(text, source=str(path))
 
 
 def scored_files(root: Path) -> list[Path]:
@@ -176,13 +274,26 @@ def scored_files(root: Path) -> list[Path]:
 
 def score_repository(root: Path) -> dict[str, object]:
     details: dict[str, int] = {}
+    total = SourceScore()
     for path in scored_files(root):
         relative = path.relative_to(root).as_posix()
-        details[relative] = score_file(path)
+        score = score_file(path)
+        details[relative] = score.units
+        total = total.plus(
+            units=score.units,
+            literal_payload=score.literal_payload,
+            source_scalars=score.source_scalars,
+        )
     return {
-        "schema": 1,
-        "metric": "lean-unicode-scalars-without-comments-or-layout",
-        "total": sum(details.values()),
+        "schema": 2,
+        "metric": "lean-structural-source-units-v1",
+        "total": total.units,
+        "literalPayload": total.literal_payload,
+        "sourceScalars": total.source_scalars,
+        "limits": {
+            "identifierScalars": MAX_IDENTIFIER_SCALARS,
+            "operatorScalars": MAX_OPERATOR_SCALARS,
+        },
         "files": details,
     }
 

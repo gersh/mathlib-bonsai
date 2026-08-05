@@ -8,7 +8,7 @@ passing CI never makes an exploit eligible.
 
 Minimize the official score while preserving exactly the public theorem surface exposed by
 `import Mathlib`. The default branch is the current record. A PR must reduce its base branch by at
-least one symbol.
+least one structural source unit. Renaming or whitespace minification alone cannot improve a score.
 
 The baseline toolchain, `lake-manifest.json`, package configuration, scorer, surface exporter, and
 workflows are protected. A normal entry may change only `Mathlib.lean` and `.lean` files under
@@ -23,24 +23,36 @@ Mathlib.lean
 Mathlib/**/*.lean
 ```
 
-The scorer reads strict UTF-8 with LF line endings and counts Unicode scalar values after removing:
+The scorer reads strict UTF-8 with LF line endings, removes comments and layout, and counts
+structural source units. Each identifier or keyword, operator token, delimiter, and literal costs
+one unit regardless of spelling length. The ignored forms are:
 
 - line comments beginning with `--` and ending at LF;
 - nested block comments beginning with `/-` and ending with the matching `-/`, including `/--` and
   `/-!` documentation forms;
 - whitespace outside a string, character literal, raw string, or `«quoted identifier»`.
 
-Everything else costs one per Unicode scalar value. In particular, spaces and comment-like text
-inside literals or quoted identifiers count. Combining characters count separately. No Unicode
-normalization is performed. Files must be regular files; symbolic links are rejected.
+For example, `by exact rfl` costs three units while `rfl` costs one. `x` and
+`aVeryLongLocalName` each cost one, so shortening a local name does nothing. Qualified names retain
+their structure: `Mathlib.Data.List` costs five units.
 
-The comment recognizer is intentionally stricter than Lean's extensible lexer: outside protected
-literals, every `--` and `/-` starts a comment for scoring. Do not define or use custom operator
-tokens that contain those sequences.
+The scorer also records the Unicode-scalar payload of strings, characters, raw strings, and numeric
+literals. That payload may not increase in an entry. This is an integrity guard, not a secondary
+leaderboard: it prevents replacing removed proof structure with data that a macro could decode.
+Non-layout, non-comment source scalars are reported only as a diagnostic and never break ties.
 
-Why not bytes? UTF-8 would arbitrarily charge common mathematical notation two to four times. Why
-not Lean tokens? Treating a 40-character identifier as one token would reward hiding text in names.
-Why ignore layout? Formatting should remain readable and stable without affecting a golf result.
+Identifiers and quoted identifiers are limited to 256 scalars and operator tokens to 32. Files must
+be strict UTF-8 regular files with LF endings; symbolic links are rejected. These generous limits
+are above the Season 1 baseline and prevent a single token from becoming an unbounded data channel.
+
+This is a deterministic contest lexer rather than Lean's extensible lexer. Outside protected
+literals, every `--` and `/-` begins a comment; delimiters are singleton units and a contiguous
+operator is one unit. The versioned implementation in `bonsai/scorer.py` is authoritative.
+
+Why units? They reward deleting proof steps, applications, binders, and repeated terms without
+rewarding one-letter names. Why ignore layout? Formatting and explanations should remain readable
+without affecting a result. Why not count parsed syntax or kernel expressions? Both are affected by
+extensible macros and elaboration internals, making the season harder to reproduce and audit.
 
 ## 3. Required compatibility
 
@@ -72,11 +84,17 @@ checks the transitive axiom dependencies of public theorems and permits only Lea
 The dependency lockfile and toolchain are fixed. Network access, environment-dependent elaboration,
 reading untracked files, or code generation that changes the built theorem library is forbidden.
 
+Comments, identifier spellings, literal payload, environment variables, and file names may not be
+used as encoded proof programs. New syntax, macros, or tactics whose purpose is to pack many proof
+operations into an undercounted token are likewise ineligible. The checker uses token limits,
+literal-payload monotonicity, a fixed dependency graph, isolated trusted comparison, and human
+review as defense in depth; passing automation does not legalize an evasion of these rules.
+
 ## 5. Pull requests
 
 An entry should state:
 
-- its claimed symbol saving;
+- its claimed structural-unit saving;
 - the files and main theorems affected;
 - the idea behind the shorter proof;
 - any meaningful tradeoff in readability, elaboration time, or reuse.

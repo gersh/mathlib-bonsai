@@ -24,7 +24,8 @@ competition infrastructure needs a fix, open a separate issue or maintainer PR.
 
 Use the pull-request template. Keep formatting and explanatory comments good—they are free. A short
 proof that needs an explanation should get one. The source score ignores comments because the
-project wants compressed formal arguments, not compressed communication.
+project wants compressed formal arguments, not compressed communication. Identifier shortening is
+also score-neutral: look for proof steps, applications, binders, and duplicated terms to remove.
 
 GitHub Actions performs the authoritative comparison against the PR base. Locally, the scorer gives
 the exact total, while the full surface check runs in the fork-side preflight and central PR CI.

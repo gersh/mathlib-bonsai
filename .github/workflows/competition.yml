@@ -12,13 +12,54 @@ permissions:
   contents: read
 
 jobs:
-  verify:
-    name: verify
+  baseline:
+    name: measure trusted baseline
     if: github.event.pull_request.draft == false
     runs-on: ubuntu-latest
     timeout-minutes: 120
     steps:
       - name: Check out trusted base
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          ref: ${{ github.event.pull_request.base.sha }}
+          fetch-depth: 1
+          path: baseline
+
+      - name: Configure Lean
+        uses: leanprover/lean-action@38fbc41a8c28c4cbaec22d7f7de508ec2e7c0dd9 # v1.5.0
+        with:
+          lake-package-directory: baseline
+          auto-config: false
+          use-github-cache: false
+          use-mathlib-cache: false
+          reinstall-transient-toolchain: true
+
+      - name: Restore upstream Mathlib cache
+        working-directory: baseline
+        run: lake exe cache --repo=leanprover-community/mathlib4 get
+
+      - name: Measure trusted baseline
+        run: |
+          python3 baseline/bonsai/scorer.py baseline --output baseline-score.json >/dev/null
+          baseline/bonsai/export_surface.sh baseline baseline/bonsai/surface.lean baseline-surface.jsonl
+
+      - name: Upload sealed baseline measurements
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: baseline-measurements
+          path: |
+            baseline-score.json
+            baseline-surface.jsonl
+          if-no-files-found: error
+          retention-days: 1
+
+  candidate:
+    name: build untrusted candidate
+    if: github.event.pull_request.draft == false
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - name: Check out trusted base tooling
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           ref: ${{ github.event.pull_request.base.sha }}
@@ -61,11 +102,6 @@ jobs:
         working-directory: baseline
         run: lake exe cache --repo=leanprover-community/mathlib4 get
 
-      - name: Measure trusted baseline
-        run: |
-          python3 baseline/bonsai/scorer.py baseline --output baseline-score.json >/dev/null
-          baseline/bonsai/export_surface.sh baseline baseline/bonsai/surface.lean baseline-surface.jsonl
-
       - name: Reuse cache in candidate
         run: cp -a baseline/.lake candidate/.lake
 
@@ -75,17 +111,76 @@ jobs:
           CI: "true"
         run: lake build --wfail Mathlib
 
-      - name: Measure candidate
+      - name: Reject build-time source generation
         run: |
-          python3 baseline/bonsai/scorer.py candidate --output candidate-score.json >/dev/null
-          baseline/bonsai/export_surface.sh candidate baseline/bonsai/surface.lean candidate-surface.jsonl
+          git -C candidate diff --exit-code HEAD
+          test -z "$(git -C candidate status --porcelain --untracked-files=all)"
+          git -C baseline diff --exit-code HEAD
+          test -z "$(git -C baseline status --porcelain --untracked-files=all)"
+
+      - name: Export candidate surface with trusted tools
+        run: baseline/bonsai/export_surface.sh candidate baseline/bonsai/surface.lean candidate-surface.jsonl
+
+      - name: Recheck source integrity after import
+        run: |
+          git -C candidate diff --exit-code HEAD
+          test -z "$(git -C candidate status --porcelain --untracked-files=all)"
+          git -C baseline diff --exit-code HEAD
+          test -z "$(git -C baseline status --porcelain --untracked-files=all)"
+
+      - name: Upload isolated candidate measurements
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: candidate-measurements
+          path: candidate-surface.jsonl
+          if-no-files-found: error
+          retention-days: 1
+
+  verify:
+    name: verify
+    if: always() && github.event.pull_request.draft == false
+    needs: [baseline, candidate]
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Check out trusted comparison code
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          ref: ${{ github.event.pull_request.base.sha }}
+          fetch-depth: 1
+          path: trusted
+
+      - name: Check out candidate source for independent scoring
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          repository: ${{ github.event.pull_request.head.repo.full_name }}
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 1
+          persist-credentials: false
+          allow-unsafe-pr-checkout: true
+          path: candidate-source
+
+      - name: Download sealed baseline measurements
+        if: needs.baseline.result == 'success'
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        with:
+          name: baseline-measurements
+
+      - name: Download isolated candidate measurements
+        if: needs.candidate.result == 'success'
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        with:
+          name: candidate-measurements
 
       - name: Compare score and public theorem surface
         id: comparison
+        if: needs.baseline.result == 'success' && needs.candidate.result == 'success'
         continue-on-error: true
         run: |
           status=0
-          python3 baseline/bonsai/compare.py \
+          python3 trusted/bonsai/scorer.py candidate-source \
+            --output candidate-score.json >/dev/null || status=$?
+          python3 trusted/bonsai/compare.py \
             baseline-score.json candidate-score.json \
             baseline-surface.jsonl candidate-surface.jsonl \
             --output result.json --markdown report.md || status=$?
@@ -94,15 +189,18 @@ jobs:
 
       - name: Explain an early failure
         if: always() && hashFiles('report.md') == ''
+        env:
+          BASELINE_JOB: ${{ needs.baseline.result }}
+          CANDIDATE_JOB: ${{ needs.candidate.result }}
         run: |
-          cat > report.md <<'EOF'
+          cat > report.md <<EOF
           ## Mathlib Bonsai result
 
-          ❌ Verification stopped before scoring. Open the failed **Mathlib Bonsai / verify** job for
-          the policy or build error. A submission must build with warnings as errors before its
-          theorem surface and score can be compared.
+          ❌ Verification stopped before trusted comparison. Baseline job: **${BASELINE_JOB}**;
+          candidate job: **${CANDIDATE_JOB}**. Open the failed job for the policy, build, source
+          integrity, or measurement error.
           EOF
-          printf '%s\n' '{"schema":1,"accepted":false,"error":"verification stopped before comparison"}' > result.json
+          printf '%s\n' '{"schema":2,"accepted":false,"error":"verification stopped before comparison"}' > result.json
           cat report.md >> "$GITHUB_STEP_SUMMARY"
 
       - name: Record PR number
