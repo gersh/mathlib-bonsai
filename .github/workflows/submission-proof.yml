@@ -67,6 +67,10 @@ jobs:
         working-directory: baseline/bonsai/measure
         run: lake build bonsai-measure
 
+      - name: Build reigning baseline with warnings as errors
+        working-directory: baseline
+        run: lake build --wfail Mathlib
+
       - name: Measure reigning baseline
         run: |
           python3 baseline/bonsai/scorer.py baseline --output baseline-score.json >/dev/null

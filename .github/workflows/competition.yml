@@ -62,6 +62,10 @@ jobs:
         working-directory: baseline/bonsai/measure
         run: lake build bonsai-measure
 
+      - name: Build trusted baseline with warnings as errors
+        working-directory: baseline
+        run: lake build --wfail Mathlib
+
       - name: Measure trusted baseline
         env:
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
