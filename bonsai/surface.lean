@@ -60,9 +60,8 @@ private partial def exprHash (seed : UInt64) (parameters : List Name) : Expr →
         exprHash seed parameters expression
 
 private def typeFingerprint (parameters : List Name) (type : Expr) : Array Json :=
-  (#[(0x243f6a8885a308d3 : UInt64), 0x13198a2e03707344,
-      0xa4093822299f31d0, 0x082efa98ec4e6c89]).map fun seed =>
-    toJson (toString (exprHash seed parameters type))
+  #[toJson (toString (hash type)),
+    toJson (toString (exprHash 0x243f6a8885a308d3 parameters type))]
 
 private def isMathlibDeclaration (environment : Environment) (name : Name) : Bool :=
   match environment.getModuleFor? name with
@@ -94,9 +93,7 @@ private def implementationKind : ConstantInfo → String
 
 private def implementationJson (info : ConstantInfo) : Json :=
   let valueFingerprint : Json := match info.value? (allowOpaque := true) with
-    -- `Expr` caches its structural hash, so this remains tractable over all public definitions.
-    -- The independent affected-file kernel-node guard and human review provide additional defense.
-    | some value => toJson (toString (hash value))
+    | some value => toJson (typeFingerprint info.levelParams value)
     | none => Json.null
   json% {
     name : $(info.name.toString),
@@ -124,9 +121,12 @@ private def writeManifest (environment : Environment) (changedModules : Std.Hash
           kind : "theorem",
           declaration : $(theoremJson name value.levelParams value.type)
         }).compress
-        for axiomName in ← Lean.collectAxioms name do
-          unless permittedAxiom axiomName do
-            forbiddenAxioms := forbiddenAxioms.insert axiomName
+        -- Public statement fingerprints remain global. Proof dependency traversal only needs the
+        -- modules this entry may alter; policy rejects every other source change.
+        if isChangedDeclaration environment changedModules name then
+          for axiomName in ← Lean.collectAxioms name do
+            unless permittedAxiom axiomName do
+              forbiddenAxioms := forbiddenAxioms.insert axiomName
     | .axiomInfo value =>
         handle.putStrLn <| (json% {
           kind : "axiom",
