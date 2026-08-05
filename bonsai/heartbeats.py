@@ -53,8 +53,12 @@ def measure_file(root: Path, relative: str) -> int:
     if "\r" in source or "\x00" in source:
         raise HeartbeatError(f"{relative}: invalid Lean source encoding")
 
-    with tempfile.TemporaryDirectory(prefix="bonsai-heartbeats-") as directory:
-        temporary = Path(directory) / path.name
+    descriptor, temporary_name = tempfile.mkstemp(
+        prefix=".bonsai-heartbeats-", suffix=".lean", dir=path.parent
+    )
+    os.close(descriptor)
+    temporary = Path(temporary_name)
+    try:
         temporary.write_text(source + _TRAILER, encoding="utf-8")
         environment = os.environ.copy()
         environment["CI"] = "true"
@@ -67,6 +71,8 @@ def measure_file(root: Path, relative: str) -> int:
             stderr=subprocess.STDOUT,
             check=False,
         )
+    finally:
+        temporary.unlink(missing_ok=True)
     if process.returncode:
         tail = process.stdout[-8000:]
         raise HeartbeatError(f"{relative}: elaboration failed\n{tail}")
