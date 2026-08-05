@@ -13,6 +13,11 @@ python3 -m bonsai.scorer .
 python3 -m unittest discover -s bonsai/tests -v
 ```
 
+Push the branch to your fork, enable GitHub Actions there if prompted, and run the **Submission
+proof** workflow with your branch selected. It compares your commit with the reigning
+`gersh/mathlib-bonsai:main`, uploads the complete result, and must pass before submission. The PR
+workflow repeats the proof independently as the authoritative merge gate.
+
 Only `Mathlib.lean` and `.lean` files under `Mathlib/` may change in an entry. This is both a security
 boundary and what prevents moving implementation into an unscored script or dependency. If the
 competition infrastructure needs a fix, open a separate issue or maintainer PR.
@@ -22,8 +27,8 @@ proof that needs an explanation should get one. The source score ignores comment
 project wants compressed formal arguments, not compressed communication.
 
 GitHub Actions performs the authoritative comparison against the PR base. Locally, the scorer gives
-the exact total, while a full surface check requires building two worktrees and is intentionally
-left to CI. Read [RULES.md](RULES.md) for the complete eligibility contract.
+the exact total, while the full surface check runs in the fork-side preflight and central PR CI.
+Read [RULES.md](RULES.md) for the complete eligibility contract.
 
 ## Maintainer setup
 

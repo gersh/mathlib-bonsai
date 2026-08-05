@@ -11,6 +11,15 @@ The frozen starting point is
 [`leanprover-community/mathlib4@b2418b0`](https://github.com/leanprover-community/mathlib4/commit/b2418b04047e1da8b7dd99534965d44fc1de9288),
 using Lean `v4.33.0-rc2`. Its initial score is **58,332,428 symbols** across 8,303 Lean files.
 
+## Reigning Bonsai
+
+| Rank | Gardener | Score | Saved this season | Entry |
+|---:|---|---:|---:|---|
+| 1 | [Mathlib community](https://github.com/leanprover-community/mathlib4/graphs/contributors) | 58,332,428 | — | Season 1 baseline |
+
+Only strict improvements merge, so the first row is always the current champion. The accepted PR
+history is the season's record book. [See the current contenders](https://github.com/gersh/mathlib-bonsai/pulls?q=is%3Aopen+label%3Abonsai%3Aeligible).
+
 ## The idea
 
 Paul Erdős liked to imagine *The Book*: a place containing the perfect proof of every theorem.
@@ -31,8 +40,9 @@ Read [THE_BOOK.md](THE_BOOK.md) for the full vision.
 1. Fork this repository and create a branch from `main`.
 2. Change only `Mathlib.lean` or `*.lean` files below `Mathlib/`. Keep all public theorem names and
    statements intact, and do not use `sorry` or new axioms.
-3. Open a pull request. The competition bot reports the old score, new score, delta, build result,
-   and theorem-surface result.
+3. In your fork, run **Actions → Submission proof → Run workflow** on your branch. Once it passes,
+   open a pull request. The competition bot independently reports the old score, new score, delta,
+   build result, and theorem-surface result.
 
 A PR is eligible to merge when it builds with warnings as errors, has an exact public theorem
 surface, uses only Lean's accepted foundational axioms, and has a strictly lower total score.
@@ -49,6 +59,10 @@ python3 -m bonsai.scorer .
 # Test the trusted scorer
 python3 -m unittest discover -s bonsai/tests -v
 ```
+
+The fork-side Submission proof action produces a downloadable proof artifact for the exact commit
+you intend to submit. Because fork workflows are contributor-controlled, the central PR action
+repeats the verification from trusted `main` tooling before declaring an entry eligible.
 
 The complete contract, including what counts as a symbol and what the automation compares, is in
 [RULES.md](RULES.md). Contribution and repository setup instructions are in
