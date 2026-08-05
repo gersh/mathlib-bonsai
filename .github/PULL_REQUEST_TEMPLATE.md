@@ -2,6 +2,10 @@
 
 <!-- Example: -3 structural units. CI will report the authoritative number. -->
 
+## Claimed heartbeat improvement
+
+<!-- Optional local estimate. CI measures the changed files in both trees. -->
+
 ## Proofs changed
 
 <!-- Name the main declarations and files. -->

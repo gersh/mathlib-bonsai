@@ -66,6 +66,10 @@ jobs:
       - name: Measure reigning baseline
         run: |
           python3 baseline/bonsai/scorer.py baseline --output baseline-score.json >/dev/null
+          mapfile -d '' changed < <(git -C candidate diff --no-renames --name-only -z \
+            '${{ steps.revisions.outputs.base }}' '${{ steps.revisions.outputs.candidate }}')
+          python3 baseline/bonsai/heartbeats.py baseline "${changed[@]}" \
+            --output baseline-heartbeats.json
           baseline/bonsai/export_surface.sh baseline baseline/bonsai/surface.lean baseline-surface.jsonl
 
       - name: Reuse cache in candidate
@@ -86,12 +90,17 @@ jobs:
       - name: Measure candidate
         run: |
           python3 baseline/bonsai/scorer.py candidate --output candidate-score.json >/dev/null
+          mapfile -d '' changed < <(git -C candidate diff --no-renames --name-only -z \
+            '${{ steps.revisions.outputs.base }}' '${{ steps.revisions.outputs.candidate }}')
+          python3 baseline/bonsai/heartbeats.py candidate "${changed[@]}" \
+            --output candidate-heartbeats.json
           baseline/bonsai/export_surface.sh candidate baseline/bonsai/surface.lean candidate-surface.jsonl
 
       - name: Prove score and public theorem surface
         run: |
           python3 baseline/bonsai/compare.py \
             baseline-score.json candidate-score.json \
+            baseline-heartbeats.json candidate-heartbeats.json \
             baseline-surface.jsonl candidate-surface.jsonl \
             --output result.json --markdown report.md
           cat report.md >> "$GITHUB_STEP_SUMMARY"
@@ -104,5 +113,7 @@ jobs:
           path: |
             result.json
             report.md
+            baseline-heartbeats.json
+            candidate-heartbeats.json
           if-no-files-found: error
           retention-days: 30

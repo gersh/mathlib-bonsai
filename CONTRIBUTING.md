@@ -31,6 +31,11 @@ GitHub Actions performs the authoritative comparison against the PR base. Locall
 the exact total, while the full surface check runs in the fork-side preflight and central PR CI.
 Read [RULES.md](RULES.md) for the complete eligibility contract.
 
+CI also re-elaborates every changed Lean file in the baseline and candidate with async elaboration
+disabled. A winning entry must reduce that affected-file heartbeat total by more than the documented
+one-heartbeat-per-file noise allowance. This is deliberately a Pareto competition: shorter source
+that makes elaboration slower does not merge.
+
 ## Maintainer setup
 
 After pushing this repository to GitHub:

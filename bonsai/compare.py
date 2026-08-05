@@ -33,6 +33,37 @@ def validate_score(value: object, path: Path) -> dict[str, object]:
             raise ValueError(f"{path}: invalid {key}")
     if value["total"] != sum(files.values()):
         raise ValueError(f"{path}: total does not match per-file scores")
+    inventory = value.get("literalInventory")
+    if not isinstance(inventory, dict) or any(
+        not isinstance(digest, str)
+        or len(digest) != 64
+        or any(char not in "0123456789abcdef" for char in digest)
+        or not isinstance(count, int)
+        or count <= 0
+        for digest, count in inventory.items()
+    ):
+        raise ValueError(f"{path}: invalid literal inventory")
+    return value
+
+
+def validate_heartbeats(value: object, path: Path) -> dict[str, object]:
+    if not isinstance(value, dict):
+        raise ValueError(f"{path}: invalid heartbeat manifest")
+    if (
+        value.get("schema") != 1
+        or value.get("metric") != "lean-affected-file-elaboration-heartbeats-v1"
+        or value.get("async") is not False
+        or value.get("unit") != "internal-heartbeats"
+    ):
+        raise ValueError(f"{path}: unsupported heartbeat manifest")
+    files = value.get("files")
+    if not isinstance(files, dict) or not files or any(
+        not isinstance(name, str) or not isinstance(count, int) or count < 0
+        for name, count in files.items()
+    ):
+        raise ValueError(f"{path}: invalid per-file heartbeat counts")
+    if not isinstance(value.get("total"), int) or value["total"] != sum(files.values()):
+        raise ValueError(f"{path}: heartbeat total does not match per-file counts")
     return value
 
 
@@ -122,6 +153,8 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("baseline_score", type=Path)
     parser.add_argument("candidate_score", type=Path)
+    parser.add_argument("baseline_heartbeats", type=Path)
+    parser.add_argument("candidate_heartbeats", type=Path)
     parser.add_argument("baseline_surface", type=Path)
     parser.add_argument("candidate_surface", type=Path)
     parser.add_argument("--output", type=Path)
@@ -131,6 +164,14 @@ def main(argv: list[str] | None = None) -> int:
     try:
         baseline_score = validate_score(load_json(args.baseline_score), args.baseline_score)
         candidate_score = validate_score(load_json(args.candidate_score), args.candidate_score)
+        baseline_heartbeats = validate_heartbeats(
+            load_json(args.baseline_heartbeats), args.baseline_heartbeats
+        )
+        candidate_heartbeats = validate_heartbeats(
+            load_json(args.candidate_heartbeats), args.candidate_heartbeats
+        )
+        if baseline_heartbeats["files"].keys() != candidate_heartbeats["files"].keys():
+            raise ValueError("baseline and candidate heartbeat file sets differ")
         baseline_surface = load_surface(args.baseline_surface)
         candidate_surface = load_surface(args.candidate_surface)
         old_total = int(baseline_score["total"])
@@ -147,6 +188,18 @@ def main(argv: list[str] | None = None) -> int:
         return 2
 
     payload_safe = new_payload <= old_payload
+    old_inventory = baseline_score["literalInventory"]
+    new_inventory = candidate_score["literalInventory"]
+    assert isinstance(old_inventory, dict) and isinstance(new_inventory, dict)
+    inventory_safe = all(
+        isinstance(count, int) and count <= old_inventory.get(digest, 0)
+        for digest, count in new_inventory.items()
+    )
+    old_heartbeats = int(baseline_heartbeats["total"])
+    new_heartbeats = int(candidate_heartbeats["total"])
+    heartbeat_file_count = len(baseline_heartbeats["files"])
+    heartbeat_tolerance = 1000 * heartbeat_file_count
+    heartbeats_improved = new_heartbeats + heartbeat_tolerance < old_heartbeats
     result = {
         "schema": 2,
         "metric": "lean-structural-source-units-v1",
@@ -157,11 +210,23 @@ def main(argv: list[str] | None = None) -> int:
         "candidateLiteralPayload": new_payload,
         "literalPayloadDelta": new_payload - old_payload,
         "literalPayloadSafe": payload_safe,
+        "literalInventorySafe": inventory_safe,
         "baselineSourceScalars": old_scalars,
         "candidateSourceScalars": new_scalars,
+        "baselineHeartbeats": old_heartbeats,
+        "candidateHeartbeats": new_heartbeats,
+        "heartbeatDelta": new_heartbeats - old_heartbeats,
+        "heartbeatTolerance": heartbeat_tolerance,
+        "heartbeatsImproved": heartbeats_improved,
         "smaller": new_total < old_total,
         "surface": surface,
-        "accepted": new_total < old_total and payload_safe and bool(surface["compatible"]),
+        "accepted": (
+            new_total < old_total
+            and payload_safe
+            and inventory_safe
+            and heartbeats_improved
+            and bool(surface["compatible"])
+        ),
     }
     encoded = json.dumps(result, ensure_ascii=False, indent=2, sort_keys=True) + "\n"
     if args.output:
@@ -172,14 +237,18 @@ def main(argv: list[str] | None = None) -> int:
     payload_delta = new_payload - old_payload
     payload_sign = "+" if payload_delta >= 0 else ""
     status = "✅ eligible" if result["accepted"] else "❌ not eligible"
+    heartbeat_delta = new_heartbeats - old_heartbeats
+    heartbeat_sign = "+" if heartbeat_delta >= 0 else ""
     markdown = (
         "## Mathlib Bonsai result\n\n"
         "| Check | Result |\n|---|---:|\n"
         f"| Baseline | {old_total:,} structural units |\n"
         f"| Candidate | {new_total:,} structural units |\n"
         f"| Change | {sign}{delta:,} structural units |\n"
-        f"| Literal-payload guard | {payload_sign}{payload_delta:,} scalars "
-        f"({'safe' if payload_safe else 'increased'}) |\n"
+        f"| Literal guard | {'no additions/changes' if inventory_safe else 'new or changed literal'}; "
+        f"payload {payload_sign}{payload_delta:,} scalars |\n"
+        f"| Affected-file heartbeats | {heartbeat_sign}{heartbeat_delta / 1000:,.3f} "
+        f"({'improved' if heartbeats_improved else 'not a measurable reduction'}) |\n"
         f"| Public theorem surface | {'exact match' if surface['compatible'] else 'changed'} |\n"
         f"| Verdict | {status} |\n"
     )
@@ -198,6 +267,17 @@ def main(argv: list[str] | None = None) -> int:
         markdown += (
             "\nLiteral payload increased. Entries may not pack removed proof structure into strings, "
             "characters, raw strings, or numeric literals.\n"
+        )
+    if not inventory_safe:
+        markdown += (
+            "\nA literal was introduced or changed. Candidate literal spellings must be a sub-multiset "
+            "of the baseline: literals may be retained or deleted, never added or repurposed.\n"
+        )
+    if not heartbeats_improved:
+        markdown += (
+            f"\nAffected-file elaboration must decrease by more than the deterministic-noise "
+            f"allowance ({heartbeat_tolerance / 1000:,.0f} heartbeat(s) for "
+            f"{heartbeat_file_count} file(s)).\n"
         )
     if args.markdown:
         args.markdown.write_text(markdown, encoding="utf-8")
