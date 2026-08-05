@@ -20,7 +20,7 @@ files.
 
 | Rank | Gardener | Score | Saved this season | Entry |
 |---:|---|---:|---:|---|
-| 1 | [Gershon Bialer](https://github.com/gersh) | 18,900,591 | 2 | [#2: progressive constant proof](https://github.com/gersh/mathlib-bonsai/pull/2) |
+| 1 | [Gershon Bialer](https://github.com/gersh) | 18,900,589 | 4 | [#3: direct integer-adjoin proof](https://github.com/gersh/mathlib-bonsai/pull/3) |
 
 Only strict improvements merge, so the first row is always the current champion. The accepted PR
 history is the season's record book. [See the current contenders](https://github.com/gersh/mathlib-bonsai/pulls?q=is%3Aopen+label%3Abonsai%3Aeligible).
