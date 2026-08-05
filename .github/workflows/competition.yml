@@ -98,7 +98,7 @@ jobs:
           cat > report.md <<'EOF'
           ## Mathlib Bonsai result
 
-          ❌ Verification stopped before scoring. Open the failed **Competition / verify** job for
+          ❌ Verification stopped before scoring. Open the failed **Mathlib Bonsai / verify** job for
           the policy or build error. A submission must build with warnings as errors before its
           theorem surface and score can be compared.
           EOF
