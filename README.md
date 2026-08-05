@@ -46,7 +46,8 @@ Read [THE_BOOK.md](THE_BOOK.md) for the full vision.
    build result, and theorem-surface result.
 
 A PR is eligible to merge when it builds with warnings as errors, has an exact public theorem
-surface, uses only Lean's accepted foundational axioms, and has a strictly lower total score.
+surface, uses only Lean's accepted foundational axioms, has a strictly lower structural score, and
+measurably reduces elaboration heartbeats across the files it changes.
 Several proofs may be improved in one PR, though small, well-explained entries are easier to review.
 
 ```bash
@@ -76,8 +77,10 @@ keyword, operator, delimiter, or literal costs one structural unit; spelling len
 Comments and layout cost zero. Thus `by exact rfl` costs three units and `rfl` costs one, while
 renaming `longLocalName` to `x` saves nothing.
 
-Literal payload is tracked separately and may not increase, unusually large identifiers/operators
-are rejected, and raw character count is diagnostic only. Together with a fixed toolchain, exact
+Existing literals may remain or be deleted, but their exact spellings cannot be added or changed;
+unusually large identifiers/operators are rejected, and raw character count is diagnostic only.
+Every entry must also reduce affected-file elaboration heartbeats beyond a small deterministic-noise
+allowance. Together with a fixed toolchain, exact
 theorem-surface comparison, axiom auditing, a scored-tree-only change policy, isolated trusted CI,
 and human review, this blocks the obvious packing and generated-code shortcuts. Tests,
 documentation, competition infrastructure, and generated `.olean` files are unscored and cannot be

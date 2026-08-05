@@ -7,6 +7,7 @@ import unittest
 
 from bonsai.scorer import ScoreError, count_units, measure_source, score_repository
 from bonsai.check_policy import allowed
+from bonsai.heartbeats import HeartbeatError, measure_repository, validate_relative_path
 
 
 class StructuralUnitTests(unittest.TestCase):
@@ -66,6 +67,7 @@ class RepositoryTests(unittest.TestCase):
             self.assertEqual(result["metric"], "lean-structural-source-units-v1")
             self.assertEqual(result["total"], 15)
             self.assertEqual(result["literalPayload"], 7)
+            self.assertEqual(sum(result["literalInventory"].values()), 1)
 
     def test_symlink_in_scored_tree_is_rejected(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
@@ -96,12 +98,21 @@ class PolicyTests(unittest.TestCase):
 
 
 class ComparisonTests(unittest.TestCase):
-    def _run_comparison(self, directory: Path, candidate_payload: int) -> subprocess.CompletedProcess[str]:
+    def _run_comparison(
+        self,
+        directory: Path,
+        candidate_payload: int,
+        *,
+        candidate_heartbeats: int = 8_000,
+        candidate_inventory: dict[str, int] | None = None,
+    ) -> subprocess.CompletedProcess[str]:
+        baseline_inventory = {"0" * 64: 1}
         common = {
             "schema": 2,
             "metric": "lean-structural-source-units-v1",
             "sourceScalars": 100,
             "limits": {"identifierScalars": 256, "operatorScalars": 32},
+            "literalInventory": baseline_inventory,
         }
         (directory / "baseline-score.json").write_text(
             json.dumps(common | {"total": 10, "literalPayload": 5, "files": {"Mathlib.lean": 10}}),
@@ -112,6 +123,7 @@ class ComparisonTests(unittest.TestCase):
                 "total": 9,
                 "literalPayload": candidate_payload,
                 "files": {"Mathlib.lean": 9},
+                "literalInventory": candidate_inventory or baseline_inventory,
             }),
             encoding="utf-8",
         )
@@ -122,6 +134,20 @@ class ComparisonTests(unittest.TestCase):
         ))
         for name in ("baseline-surface.jsonl", "candidate-surface.jsonl"):
             (directory / name).write_text(surface, encoding="utf-8")
+        heartbeat_common = {
+            "schema": 1,
+            "metric": "lean-affected-file-elaboration-heartbeats-v1",
+            "async": False,
+            "unit": "internal-heartbeats",
+        }
+        (directory / "baseline-heartbeats.json").write_text(json.dumps(heartbeat_common | {
+            "total": 10_000,
+            "files": {"Mathlib.lean": 10_000},
+        }), encoding="utf-8")
+        (directory / "candidate-heartbeats.json").write_text(json.dumps(heartbeat_common | {
+            "total": candidate_heartbeats,
+            "files": {"Mathlib.lean": candidate_heartbeats},
+        }), encoding="utf-8")
         return subprocess.run(
             [
                 sys.executable,
@@ -129,6 +155,8 @@ class ComparisonTests(unittest.TestCase):
                 "bonsai.compare",
                 "baseline-score.json",
                 "candidate-score.json",
+                "baseline-heartbeats.json",
+                "candidate-heartbeats.json",
                 "baseline-surface.jsonl",
                 "candidate-surface.jsonl",
                 "--output",
@@ -155,6 +183,38 @@ class ComparisonTests(unittest.TestCase):
             result = json.loads((root / "result.json").read_text(encoding="utf-8"))
             self.assertFalse(result["accepted"])
             self.assertFalse(result["literalPayloadSafe"])
+
+    def test_new_literal_is_rejected_even_when_total_payload_falls(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            completed = self._run_comparison(
+                root,
+                candidate_payload=4,
+                candidate_inventory={"1" * 64: 1},
+            )
+            self.assertEqual(completed.returncode, 1)
+            result = json.loads((root / "result.json").read_text(encoding="utf-8"))
+            self.assertFalse(result["literalInventorySafe"])
+
+    def test_heartbeats_must_decrease_beyond_per_file_tolerance(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            completed = self._run_comparison(root, candidate_payload=5, candidate_heartbeats=9_500)
+            self.assertEqual(completed.returncode, 1)
+            result = json.loads((root / "result.json").read_text(encoding="utf-8"))
+            self.assertFalse(result["heartbeatsImproved"])
+
+
+class HeartbeatTests(unittest.TestCase):
+    def test_paths_cannot_escape_scored_tree(self) -> None:
+        self.assertEqual(validate_relative_path("Mathlib/X.lean"), Path("Mathlib/X.lean"))
+        for path in ("../X.lean", "/Mathlib/X.lean", "Mathlib/../X.lean", "Archive/X.lean"):
+            with self.subTest(path=path), self.assertRaises(HeartbeatError):
+                validate_relative_path(path)
+
+    def test_no_files_is_rejected(self) -> None:
+        with self.assertRaises(HeartbeatError):
+            measure_repository(Path.cwd(), [])
 
 
 if __name__ == "__main__":

@@ -25,6 +25,26 @@ jobs:
           fetch-depth: 1
           path: baseline
 
+      - name: Check out candidate source for the changed-file set
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          repository: ${{ github.event.pull_request.head.repo.full_name }}
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+          allow-unsafe-pr-checkout: true
+          path: candidate-source
+
+      - name: Fetch and validate the base comparison
+        working-directory: candidate-source
+        env:
+          BASE_REPOSITORY: ${{ github.repository }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          git fetch --no-tags --depth=1 "https://github.com/${BASE_REPOSITORY}.git" "$BASE_SHA"
+          python3 ../baseline/bonsai/check_policy.py . "$BASE_SHA" "$HEAD_SHA"
+
       - name: Configure Lean
         uses: leanprover/lean-action@38fbc41a8c28c4cbaec22d7f7de508ec2e7c0dd9 # v1.5.0
         with:
@@ -39,8 +59,14 @@ jobs:
         run: lake exe cache --repo=leanprover-community/mathlib4 get
 
       - name: Measure trusted baseline
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
         run: |
           python3 baseline/bonsai/scorer.py baseline --output baseline-score.json >/dev/null
+          mapfile -d '' changed < <(git -C candidate-source diff --no-renames --name-only -z "$BASE_SHA" "$HEAD_SHA")
+          python3 baseline/bonsai/heartbeats.py baseline "${changed[@]}" \
+            --output baseline-heartbeats.json
           baseline/bonsai/export_surface.sh baseline baseline/bonsai/surface.lean baseline-surface.jsonl
 
       - name: Upload sealed baseline measurements
@@ -49,6 +75,7 @@ jobs:
           name: baseline-measurements
           path: |
             baseline-score.json
+            baseline-heartbeats.json
             baseline-surface.jsonl
           if-no-files-found: error
           retention-days: 1
@@ -119,7 +146,14 @@ jobs:
           test -z "$(git -C baseline status --porcelain --untracked-files=all)"
 
       - name: Export candidate surface with trusted tools
-        run: baseline/bonsai/export_surface.sh candidate baseline/bonsai/surface.lean candidate-surface.jsonl
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          mapfile -d '' changed < <(git -C candidate diff --no-renames --name-only -z "$BASE_SHA" "$HEAD_SHA")
+          python3 baseline/bonsai/heartbeats.py candidate "${changed[@]}" \
+            --output candidate-heartbeats.json
+          baseline/bonsai/export_surface.sh candidate baseline/bonsai/surface.lean candidate-surface.jsonl
 
       - name: Recheck source integrity after import
         run: |
@@ -132,7 +166,9 @@ jobs:
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: candidate-measurements
-          path: candidate-surface.jsonl
+          path: |
+            candidate-heartbeats.json
+            candidate-surface.jsonl
           if-no-files-found: error
           retention-days: 1
 
@@ -182,6 +218,7 @@ jobs:
             --output candidate-score.json >/dev/null || status=$?
           python3 trusted/bonsai/compare.py \
             baseline-score.json candidate-score.json \
+            baseline-heartbeats.json candidate-heartbeats.json \
             baseline-surface.jsonl candidate-surface.jsonl \
             --output result.json --markdown report.md || status=$?
           cat report.md >> "$GITHUB_STEP_SUMMARY"

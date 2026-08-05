@@ -10,7 +10,9 @@ recorded separately as anti-packing diagnostics.
 from __future__ import annotations
 
 import argparse
-from dataclasses import dataclass
+from collections import Counter
+from dataclasses import dataclass, field
+import hashlib
 import json
 from pathlib import Path
 import sys
@@ -26,21 +28,27 @@ class ScoreError(ValueError):
     """The source cannot be scored unambiguously."""
 
 
-@dataclass(frozen=True)
+@dataclass
 class SourceScore:
     """The three measurements collected from one source string."""
 
     units: int = 0
     literal_payload: int = 0
     source_scalars: int = 0
+    literal_inventory: Counter[str] = field(default_factory=Counter)
 
     def plus(self, *, units: int = 0, literal_payload: int = 0,
-             source_scalars: int = 0) -> "SourceScore":
-        return SourceScore(
-            self.units + units,
-            self.literal_payload + literal_payload,
-            self.source_scalars + source_scalars,
-        )
+             source_scalars: int = 0, literal: str | None = None,
+             literal_inventory: Counter[str] | None = None) -> "SourceScore":
+        self.units += units
+        self.literal_payload += literal_payload
+        self.source_scalars += source_scalars
+        if literal is not None:
+            digest = hashlib.sha256(literal.encode("utf-8")).hexdigest()
+            self.literal_inventory[digest] += 1
+        if literal_inventory is not None:
+            self.literal_inventory.update(literal_inventory)
+        return self
 
 
 def _raw_string_start(text: str, offset: int) -> tuple[int, str] | None:
@@ -146,6 +154,7 @@ def measure_source(text: str, *, source: str = "<string>") -> SourceScore:
                 # charge everything except the fixed r and two quote marks.
                 literal_payload=after - offset - 3,
                 source_scalars=after - offset,
+                literal=text[offset:after],
             )
             offset = after
             continue
@@ -156,6 +165,7 @@ def measure_source(text: str, *, source: str = "<string>") -> SourceScore:
                 units=1,
                 literal_payload=char_end - offset - 2,
                 source_scalars=char_end - offset,
+                literal=text[offset:char_end],
             )
             offset = char_end
             continue
@@ -179,6 +189,7 @@ def measure_source(text: str, *, source: str = "<string>") -> SourceScore:
                 units=1,
                 literal_payload=offset - start - 2,
                 source_scalars=offset - start,
+                literal=text[start:offset],
             )
             continue
 
@@ -209,6 +220,7 @@ def measure_source(text: str, *, source: str = "<string>") -> SourceScore:
                 units=1,
                 literal_payload=token_length,
                 source_scalars=token_length,
+                literal=text[start:offset],
             )
             continue
 
@@ -283,12 +295,14 @@ def score_repository(root: Path) -> dict[str, object]:
             units=score.units,
             literal_payload=score.literal_payload,
             source_scalars=score.source_scalars,
+            literal_inventory=score.literal_inventory,
         )
     return {
         "schema": 2,
         "metric": "lean-structural-source-units-v1",
         "total": total.units,
         "literalPayload": total.literal_payload,
+        "literalInventory": dict(sorted(total.literal_inventory.items())),
         "sourceScalars": total.source_scalars,
         "limits": {
             "identifierScalars": MAX_IDENTIFIER_SCALARS,
