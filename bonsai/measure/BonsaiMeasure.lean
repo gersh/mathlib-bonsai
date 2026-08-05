@@ -3,9 +3,9 @@ import Lean
 /-!
 Trusted affected-file complexity measurement for Mathlib Bonsai.
 
-The Python driver supplies a comment-masked copy of one Mathlib source file. This executable parses
-and elaborates it with async elaboration disabled, then reports raw syntax-tree nodes, kernel
-expression nodes in declarations produced by the file, and Lean's internal heartbeat counter.
+The Python driver supplies one Mathlib source file. This executable parses and elaborates it with
+async elaboration disabled, then reports raw syntax-tree nodes and kernel expression nodes in all
+declarations produced by the file. Documentation-comment subtrees are deliberately free.
 -/
 
 open Lean

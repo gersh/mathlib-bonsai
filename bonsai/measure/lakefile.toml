@@ -1,0 +1,7 @@
+name = "bonsaiMeasure"
+defaultTargets = ["bonsai-measure"]
+
+[[lean_exe]]
+name = "bonsai-measure"
+root = "BonsaiMeasure"
+supportInterpreter = true

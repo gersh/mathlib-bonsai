@@ -59,7 +59,7 @@ jobs:
         run: lake exe cache --repo=leanprover-community/mathlib4 get
 
       - name: Build trusted complexity meter
-        working-directory: baseline
+        working-directory: baseline/bonsai/measure
         run: lake build bonsai-measure
 
       - name: Measure trusted baseline
@@ -72,7 +72,7 @@ jobs:
           python3 baseline/bonsai/heartbeats.py baseline "${changed[@]}" \
             --output baseline-heartbeats.json
           python3 baseline/bonsai/complexity.py baseline "${changed[@]}" \
-            --executable baseline/.lake/build/bin/bonsai-measure \
+            --executable baseline/bonsai/measure/.lake/build/bin/bonsai-measure \
             --output baseline-complexity.json
           baseline/bonsai/export_surface.sh baseline baseline/bonsai/surface.lean \
             baseline-surface.jsonl "${changed[@]}"
@@ -139,7 +139,7 @@ jobs:
         run: lake exe cache --repo=leanprover-community/mathlib4 get
 
       - name: Build trusted complexity meter
-        working-directory: baseline
+        working-directory: baseline/bonsai/measure
         run: lake build bonsai-measure
 
       - name: Reuse cache in candidate
@@ -167,7 +167,7 @@ jobs:
           python3 baseline/bonsai/heartbeats.py candidate "${changed[@]}" \
             --output candidate-heartbeats.json
           python3 baseline/bonsai/complexity.py candidate "${changed[@]}" \
-            --executable baseline/.lake/build/bin/bonsai-measure \
+            --executable baseline/bonsai/measure/.lake/build/bin/bonsai-measure \
             --output candidate-complexity.json
           baseline/bonsai/export_surface.sh candidate baseline/bonsai/surface.lean \
             candidate-surface.jsonl "${changed[@]}"
