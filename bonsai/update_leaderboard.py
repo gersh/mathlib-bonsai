@@ -96,7 +96,7 @@ def main() -> int:
         arguments.readme.write_text(updated, encoding="utf-8")
         print("updated reigning leaderboard")
     else:
-        print("no associated merged pull request; leaderboard unchanged")
+        print("leaderboard already current or no merged pull request is associated with this push")
     return 0
 
 

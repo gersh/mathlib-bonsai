@@ -60,7 +60,7 @@ jobs:
       - name: Commit a changed leaderboard
         run: |
           if git diff --quiet -- README.md; then
-            echo 'No merged competition entry is associated with this push.'
+            echo 'The leaderboard is already current; no commit is needed.'
             exit 0
           fi
           git config user.name 'github-actions[bot]'

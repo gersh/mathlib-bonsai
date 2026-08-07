@@ -24,6 +24,8 @@ files.
 |---:|---|---:|---:|---|
 | 1 | [@MrBrain295](https://github.com/MrBrain295) | 18,900,584 | 9 | [#4](https://github.com/gersh/mathlib-bonsai/pull/4) |
 
+<!-- bonsai-leaderboard:smoke-test -->
+
 <!-- bonsai-leaderboard:end -->
 
 Only strict improvements merge, so the first row is always the current champion. The accepted PR
