@@ -48,11 +48,10 @@ def pathGraph_two_embedding (n : ℕ) (h : 2 ≤ n) : pathGraph 2 ↪g pathGraph
 
 theorem chromaticNumber_pathGraph (n : ℕ) (h : 2 ≤ n) :
     (pathGraph n).chromaticNumber = 2 := by
-  have hc := (pathGraph.bicoloring n).colorable
-  apply le_antisymm
-  · exact hc.chromaticNumber_le
-  · have hadj : (pathGraph n).Adj ⟨0, Nat.zero_lt_of_lt h⟩ ⟨1, h⟩ := by simp [pathGraph_adj]
-    exact two_le_chromaticNumber_of_adj hadj
+  refine le_antisymm (pathGraph.bicoloring n).colorable.chromaticNumber_le ?_
+  have hadj : (pathGraph n).Adj ⟨0, Nat.zero_lt_of_lt h⟩ ⟨1, h⟩ := by
+    simp [pathGraph_adj]
+  exact two_le_chromaticNumber_of_adj hadj
 
 theorem Coloring.even_length_iff_congr {α} {G : SimpleGraph α}
     (c : G.Coloring Bool) {u v : α} (p : G.Walk u v) :
