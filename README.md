@@ -18,9 +18,13 @@ files.
 
 ## Reigning Bonsai
 
+<!-- bonsai-leaderboard:start -->
+
 | Rank | Gardener | Score | Saved this season | Entry |
 |---:|---|---:|---:|---|
-| 1 | [Gershon Bialer](https://github.com/gersh) | 18,900,589 | 4 | [#3: direct integer-adjoin proof](https://github.com/gersh/mathlib-bonsai/pull/3) |
+| 1 | [@MrBrain295](https://github.com/MrBrain295) | 18,900,584 | 9 | [#4](https://github.com/gersh/mathlib-bonsai/pull/4) |
+
+<!-- bonsai-leaderboard:end -->
 
 Only strict improvements merge, so the first row is always the current champion. The accepted PR
 history is the season's record book. [See the current contenders](https://github.com/gersh/mathlib-bonsai/pulls?q=is%3Aopen+label%3Abonsai%3Aeligible).
