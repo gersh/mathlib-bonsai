@@ -77,7 +77,16 @@ After pushing this repository to GitHub:
    `infrastructure` label for non-entry work.
 6. Enable native auto-merge and the update-branch button. Use auto-merge only after maintainer
    approval; branch-up-to-date protection prevents merging until the updated tree is verified.
+7. Give a dedicated read/write deploy key bypass permission in the `main` ruleset and store its
+   private half as the `LEADERBOARD_DEPLOY_KEY` Actions secret. Do not reuse this key elsewhere.
+   The ordinary Actions token remains read-only.
 
 The split workflow matters: candidate Lean code is untrusted native code. It never runs in a job
 holding a write token or repository secrets. The reporter runs only after the verifier and consumes
 the verifier's Markdown artifact; it never checks out or executes candidate code.
+
+After a merged PR reaches `main`, **Bonsai reigning score** recalculates the trusted score, resolves
+the PR associated with the merge commit, and replaces the marked leaderboard block in `README.md`.
+Only that trusted push workflow receives the deploy key. Its generated commit uses `[skip ci]` to
+avoid a workflow loop. To replay a missed update, open **Actions → Bonsai reigning score → Run
+workflow** and enter the merged PR number; an ordinary automatic run needs no input.
