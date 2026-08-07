@@ -4,6 +4,11 @@ on:
   push:
     branches: [main]
   workflow_dispatch:
+    inputs:
+      pull_request:
+        description: Optional merged PR number to replay for the leaderboard
+        required: false
+        type: string
 
 concurrency:
   group: bonsai-reigning-score
@@ -27,14 +32,30 @@ jobs:
           printf '## Reigning score\n\n%s structural units\n' "$total" >> "$GITHUB_STEP_SUMMARY"
 
       - name: Resolve the merged entry
+        id: entry
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: gh api "repos/$GITHUB_REPOSITORY/commits/$GITHUB_SHA/pulls" > associated-prs.json
+          MANUAL_PR: ${{ inputs.pull_request }}
+        run: |
+          commit_sha="$GITHUB_SHA"
+          if [[ -n "$MANUAL_PR" ]]; then
+            if [[ ! "$MANUAL_PR" =~ ^[1-9][0-9]*$ ]]; then
+              echo 'pull_request must be a positive integer' >&2
+              exit 2
+            fi
+            gh api "repos/$GITHUB_REPOSITORY/pulls/$MANUAL_PR" \
+              --jq '[.]' > associated-prs.json
+            commit_sha=$(python3 -c \
+              'import json; print(json.load(open("associated-prs.json"))[0]["merge_commit_sha"])')
+          else
+            gh api "repos/$GITHUB_REPOSITORY/commits/$GITHUB_SHA/pulls" > associated-prs.json
+          fi
+          printf 'commit_sha=%s\n' "$commit_sha" >> "$GITHUB_OUTPUT"
 
       - name: Update the front-page leaderboard
         run: >-
           python3 bonsai/update_leaderboard.py README.md reigning-score.json bonsai/season.json
-          associated-prs.json --commit-sha "$GITHUB_SHA"
+          associated-prs.json --commit-sha "${{ steps.entry.outputs.commit_sha }}"
 
       - name: Commit a changed leaderboard
         run: |
