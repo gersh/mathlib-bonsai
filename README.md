@@ -23,11 +23,13 @@ files.
 | Rank | Gardener | Score | Saved this season | Entry |
 |---:|---|---:|---:|---|
 | 1 | [@MrBrain295](https://github.com/MrBrain295) | 18,900,584 | 9 | [#4](https://github.com/gersh/mathlib-bonsai/pull/4) |
+| 2 | [@gersh](https://github.com/gersh) | 18,900,589 | 4 | [#3](https://github.com/gersh/mathlib-bonsai/pull/3) |
+| 3 | [@gersh](https://github.com/gersh) | 18,900,591 | 2 | [#2](https://github.com/gersh/mathlib-bonsai/pull/2) |
 
 <!-- bonsai-leaderboard:end -->
 
-Only strict improvements merge, so the first row is always the current champion. The accepted PR
-history is the season's record book. [See the current contenders](https://github.com/gersh/mathlib-bonsai/pulls?q=is%3Aopen+label%3Abonsai%3Aeligible).
+Only strict improvements merge, so the first row is always the current champion; lower rows retain
+every prior champion from the season. [See the current contenders](https://github.com/gersh/mathlib-bonsai/pulls?q=is%3Aopen+label%3Abonsai%3Aeligible).
 
 ## The idea
 

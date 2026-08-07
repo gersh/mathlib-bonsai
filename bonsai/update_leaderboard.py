@@ -6,6 +6,7 @@ from __future__ import annotations
 import argparse
 import json
 import re
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -13,6 +14,81 @@ from typing import Any
 START = "<!-- bonsai-leaderboard:start -->"
 END = "<!-- bonsai-leaderboard:end -->"
 LOGIN = re.compile(r"[A-Za-z0-9](?:[A-Za-z0-9-]{0,37}[A-Za-z0-9])?")
+NUMBER = re.compile(r"(?:0|[1-9][0-9]{0,2}(?:,[0-9]{3})*)")
+GARDENER = re.compile(
+    r"\[@(?P<login>[A-Za-z0-9-]+)\]\(https://github\.com/(?P<profile>[A-Za-z0-9-]+)\)"
+)
+ENTRY_LINK = re.compile(
+    r"\[#(?P<number>[1-9][0-9]*)\]\((?P<url>https://github\.com/[^/]+/[^/]+/pull/"
+    r"(?P<link_number>[1-9][0-9]*))\)"
+)
+HEADER = "| Rank | Gardener | Score | Saved this season | Entry |"
+DIVIDER = "|---:|---|---:|---:|---|"
+BLOCK = re.compile(re.escape(START) + r"(?P<body>.*?)" + re.escape(END), re.DOTALL)
+
+
+@dataclass(frozen=True)
+class LeaderboardEntry:
+    number: int
+    login: str
+    score: int
+    url: str
+
+
+def _formatted_number(value: str, field: str) -> int:
+    if NUMBER.fullmatch(value) is None:
+        raise ValueError(f"leaderboard has an invalid {field}")
+    return int(value.replace(",", ""))
+
+
+def _existing_entries(readme: str, baseline_score: int) -> list[LeaderboardEntry]:
+    matches = list(BLOCK.finditer(readme))
+    if len(matches) != 1:
+        raise ValueError("README must contain exactly one leaderboard marker pair")
+    lines = [line.strip() for line in matches[0].group("body").splitlines() if line.strip()]
+    if len(lines) < 2 or lines[:2] != [HEADER, DIVIDER]:
+        raise ValueError("README leaderboard header is invalid")
+    entries: list[LeaderboardEntry] = []
+    for expected_rank, line in enumerate(lines[2:], start=1):
+        columns = [column.strip() for column in line.split("|")]
+        if len(columns) != 7 or columns[0] or columns[-1]:
+            raise ValueError("README leaderboard row is invalid")
+        rank, gardener, score_text, saved_text, link = columns[1:6]
+        gardener_match = GARDENER.fullmatch(gardener)
+        link_match = ENTRY_LINK.fullmatch(link)
+        if rank != str(expected_rank) or gardener_match is None or link_match is None:
+            raise ValueError("README leaderboard row is invalid")
+        login = gardener_match.group("login")
+        if login != gardener_match.group("profile") or LOGIN.fullmatch(login) is None:
+            raise ValueError("README leaderboard row has an invalid gardener")
+        number = int(link_match.group("number"))
+        if number != int(link_match.group("link_number")):
+            raise ValueError("README leaderboard row has an invalid PR link")
+        score = _formatted_number(score_text, "score")
+        saved = _formatted_number(saved_text, "saved total")
+        if saved != baseline_score - score:
+            raise ValueError("README leaderboard saved total disagrees with its score")
+        entries.append(LeaderboardEntry(number, login, score, link_match.group("url")))
+    if len({entry.number for entry in entries}) != len(entries):
+        raise ValueError("README leaderboard contains a duplicate PR")
+    if entries != sorted(entries, key=lambda entry: entry.score):
+        raise ValueError("README leaderboard is not ordered by score")
+    return entries
+
+
+def _render(readme: str, entries: list[LeaderboardEntry], baseline_score: int) -> str:
+    rows = [HEADER, DIVIDER]
+    for rank, entry in enumerate(entries, start=1):
+        rows.append(
+            f"| {rank} | [@{entry.login}](https://github.com/{entry.login}) | "
+            f"{entry.score:,} | {baseline_score - entry.score:,} | "
+            f"[#{entry.number}]({entry.url}) |"
+        )
+    replacement = f"{START}\n\n" + "\n".join(rows) + f"\n\n{END}"
+    updated, count = BLOCK.subn(replacement, readme)
+    if count != 1:
+        raise ValueError("README must contain exactly one leaderboard marker pair")
+    return updated
 
 
 def _merged_pr(records: Any, commit_sha: str) -> dict[str, Any] | None:
@@ -58,24 +134,18 @@ def update_text(
         raise ValueError("merged pull request has an invalid URL")
     if not isinstance(score, int) or not isinstance(baseline_score, int):
         raise ValueError("scores must be integers")
-    saved = baseline_score - score
-    if saved < 0:
+    if baseline_score - score < 0:
         raise ValueError("reigning score exceeds the season baseline")
-
-    table = "\n".join(
-        (
-            "| Rank | Gardener | Score | Saved this season | Entry |",
-            "|---:|---|---:|---:|---|",
-            f"| 1 | [@{login}](https://github.com/{login}) | {score:,} | {saved:,} | "
-            f"[#{number}]({url}) |",
-        )
-    )
-    replacement = f"{START}\n\n{table}\n\n{END}"
-    pattern = re.compile(re.escape(START) + r".*?" + re.escape(END), re.DOTALL)
-    updated, count = pattern.subn(replacement, readme)
-    if count != 1:
-        raise ValueError("README must contain exactly one leaderboard marker pair")
-    return updated
+    entries = _existing_entries(readme, baseline_score)
+    prior = next((entry for entry in entries if entry.number == number), None)
+    if prior is not None and prior.score != score:
+        raise ValueError("replayed PR score disagrees with its recorded leaderboard score")
+    if prior is None and score >= min((entry.score for entry in entries), default=baseline_score):
+        raise ValueError("new leaderboard entry is not a strict improvement")
+    entries = [entry for entry in entries if entry.number != number]
+    entries.append(LeaderboardEntry(number, login, score, url))
+    entries.sort(key=lambda entry: entry.score)
+    return _render(readme, entries, baseline_score)
 
 
 def main() -> int:

@@ -86,7 +86,8 @@ holding a write token or repository secrets. The reporter runs only after the ve
 the verifier's Markdown artifact; it never checks out or executes candidate code.
 
 After a merged PR reaches `main`, **Bonsai reigning score** recalculates the trusted score, resolves
-the PR associated with the merge commit, and replaces the marked leaderboard block in `README.md`.
+the PR associated with the merge commit, and re-renders the complete season leaderboard in
+`README.md` without discarding prior champions.
 Only that trusted push workflow receives the deploy key. Its generated commit uses `[skip ci]` to
 avoid a workflow loop. To replay a missed update, open **Actions → Bonsai reigning score → Run
 workflow** and enter the merged PR number; an ordinary automatic run needs no input.
